@@ -1,0 +1,338 @@
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
+import { Usuario } from './usuario.entity';
+import { CreateUsuarioDto } from './dto/create-usuario.dto';
+import { UpdateUsuarioDto } from './dto/update-usuario.dto';
+import { Rol } from '../roles/rol.entity';
+import * as CryptoJS from 'crypto-js';
+import { JwtService } from '@nestjs/jwt';
+import { LoginUsuarioDto } from './dto/login-usuario.dto';
+
+@Injectable()
+export class UsuariosService {
+  constructor(
+    @InjectRepository(Usuario)
+    private usuarioRepository: Repository<Usuario>,
+    @InjectRepository(Rol)
+    private rolRepository: Repository<Rol>,
+    private dataSource: DataSource,
+    private jwtService: JwtService,
+  ) {}
+  async crearUsuariosMasivo(
+    createUsuariosDto: CreateUsuarioDto[],
+  ): Promise<{ usuarios: Usuario[]; errors: any[] }> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    const usuariosCreados: Usuario[] = [];
+    try {
+      const secretKey = process.env.AES_SECRET_KEY;
+      for (const dto of createUsuariosDto) {
+        const { rol_usu, clave_usu, ...userData } = dto;
+
+        const usuarioExistente = await queryRunner.manager.findOne(Usuario, {
+          where: { email_usu: userData.email_usu },
+        });
+        if (usuarioExistente) {
+          throw new BadRequestException(
+            `El correo ${userData.email_usu} ya está registrado`,
+          );
+        }
+
+        const rol = await queryRunner.manager.findOne(Rol, {
+          where: { id_rol: rol_usu },
+        });
+        if (!rol) {
+          throw new NotFoundException(
+            `El rol con id ${rol_usu} no fue encontrado`,
+          );
+        }
+
+        // Encriptar la contraseña
+        const encryptedPassword = CryptoJS.AES.encrypt(
+          clave_usu,
+          secretKey,
+        ).toString();
+
+        const usuario = this.usuarioRepository.create({
+          ...userData,
+          clave_usu: encryptedPassword,
+          rol_usu: rol,
+        });
+        const usuarioGuardado = await queryRunner.manager.save(usuario);
+        usuariosCreados.push(usuarioGuardado);
+      }
+      await queryRunner.commitTransaction();
+      return { usuarios: usuariosCreados, errors: [] };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+  async crearUsuario(createUsuarioDto: CreateUsuarioDto): Promise<{
+    message: string;
+    usuario: Usuario;
+  }> {
+    const { rol_usu, clave_usu, ...userData } = createUsuarioDto;
+
+    const usuarioExistente = await this.usuarioRepository.findOne({
+      where: { email_usu: userData.email_usu },
+    });
+    if (usuarioExistente) {
+      throw new BadRequestException(
+        `El correo ${userData.email_usu} ya está registrado`,
+      );
+    }
+    const rol = await this.rolRepository.findOne({
+      where: { id_rol: rol_usu },
+    });
+    if (!rol) {
+      throw new NotFoundException(`El rol con id ${rol_usu} no fue encontrado`);
+    }
+
+    const secretKey = process.env.AES_SECRET_KEY;
+    const encryptedPassword = CryptoJS.AES.encrypt(
+      clave_usu,
+      secretKey,
+    ).toString();
+
+    const usuario = this.usuarioRepository.create({
+      ...userData,
+      clave_usu: encryptedPassword,
+      rol_usu: rol,
+    });
+
+    const usuarioGuardado = await this.usuarioRepository.save(usuario);
+    return {
+      message: 'Usuario creado correctamente',
+      usuario: usuarioGuardado
+    };
+  }
+
+  async listarUsuarios(): Promise<Usuario[]> {
+    return this.usuarioRepository.find();
+  }
+
+  async listarUsuario(id: number): Promise<Usuario> {
+    const usuario = await this.usuarioRepository.findOne({
+      where: { id_usu: id },
+    });
+    if (!usuario) {
+      throw new NotFoundException(`El usuario con id: ${id} no fue encontrado`);
+    }
+    return usuario;
+  }
+
+  async actualizarUsuario(
+    id: number,
+    updateUsuarioDto: UpdateUsuarioDto,
+  ): Promise<{ message: string; usuario: Usuario }> {
+    const usuario = await this.listarUsuario(id);
+
+    if (updateUsuarioDto.rol_usu) {
+      const rol = await this.rolRepository.findOne({
+        where: { id_rol: updateUsuarioDto.rol_usu },
+      });
+      if (!rol) {
+        throw new NotFoundException(
+          `El usuario con rol: ${updateUsuarioDto.rol_usu} no fue encontrado`,
+        );
+      }
+      usuario.rol_usu = rol;
+    }
+
+    // Si se envía la nueva contraseña, se encripta antes de asignarla
+    if (updateUsuarioDto.clave_usu) {
+      const secretKey = process.env.AES_SECRET_KEY;
+      updateUsuarioDto.clave_usu = CryptoJS.AES.encrypt(
+        updateUsuarioDto.clave_usu,
+        secretKey,
+      ).toString();
+    }
+
+    // Asigna el resto de los campos del DTO al usuario
+    Object.assign(usuario, updateUsuarioDto);
+    const usuarioActualizado = await this.usuarioRepository.save(usuario);
+
+    return {
+      message: 'Usuario actualizado correctamente',
+      usuario: usuarioActualizado,
+    };
+  }
+
+  async inactivarUsuario(
+    id: number,
+    updateUsuarioDto?: UpdateUsuarioDto,
+  ): Promise<{ message: string; usuario: Usuario }> {
+    const usuario = await this.listarUsuario(id);
+    usuario.esta_usu = 'Inactivo';
+    if (updateUsuarioDto) {
+      if ('esta_usu' in updateUsuarioDto) {
+        delete updateUsuarioDto.esta_usu;
+      }
+      Object.assign(usuario, updateUsuarioDto);
+    }
+
+    const usuarioInactivado = await this.usuarioRepository.save(usuario);
+
+    return {
+      message: 'Usuario inactivado correctamente',
+      usuario: usuarioInactivado,
+    };
+  }
+  async activarUsuario(
+    id: number,
+    updateUsuarioDto?: UpdateUsuarioDto,
+  ): Promise<{ message: string; usuario: Usuario }> {
+    const usuario = await this.listarUsuario(id);
+    usuario.esta_usu = 'Activo';
+
+    if (updateUsuarioDto) {
+      if ('esta_usu' in updateUsuarioDto) {
+        delete updateUsuarioDto.esta_usu;
+      }
+      Object.assign(usuario, updateUsuarioDto);
+    }
+
+    const usuarioActivado = await this.usuarioRepository.save(usuario);
+
+    return {
+      message: 'Usuario activado correctamente',
+      usuario: usuarioActivado,
+    };
+  }
+  async correoRegistrado(email: string): Promise<boolean> {
+    const usuario = await this.usuarioRepository.findOne({
+      where: { email_usu: email },
+    });
+    return !!usuario;
+  }
+  async login(
+    loginUsuarioDto: LoginUsuarioDto,
+  ): Promise<{ message: string; usuario: Usuario; token: string }> {
+    const { email_usu, clave_usu } = loginUsuarioDto;
+
+    // Buscar al usuario por su correo
+    const usuario = await this.usuarioRepository.findOne({
+      where: { email_usu },
+    });
+    if (!usuario) {
+      throw new NotFoundException(
+        `Usuario con correo ${email_usu} no encontrado`,
+      );
+    }
+
+    // Desencriptar la contraseña almacenada
+    const secretKey = process.env.AES_SECRET_KEY;
+    const bytes = CryptoJS.AES.decrypt(usuario.clave_usu, secretKey);
+    const decryptedPassword = bytes.toString(CryptoJS.enc.Utf8);
+
+    if (decryptedPassword !== clave_usu) {
+      throw new BadRequestException('Contraseña incorrecta');
+    }
+
+    // Generar el token JWT con el payload que necesites
+    const payload = { id: usuario.id_usu, email: usuario.email_usu };
+    const token = this.jwtService.sign(payload);
+
+    return { message: 'Login exitoso', usuario, token };
+  }
+
+  async loginDesdeGoogle(body: {
+    email: string;
+    nombre: string;
+    foto?: string;
+  }): Promise<{ usuario: Usuario; token: string }> {
+    let usuario = await this.usuarioRepository.findOne({
+      where: { email_usu: body.email },
+      relations: ['rol_usu'],
+    });
+
+    if (!usuario) {
+      // 🔍 Verificar si existe el rol "invitado" con id_rol = 2
+      let rol = await this.rolRepository.findOne({
+        where: { id_rol: 2 },
+      });
+
+      // 🛠 Si no existe, lo crea
+      if (!rol) {
+        rol = this.rolRepository.create({
+          id_rol: 2,
+          nom_rol: 'invitado',
+          desc_rol: 'Rol asignado a usuarios registrados por Google',
+          est_rol: 'Activo',
+        });
+
+        rol = await this.rolRepository.save(rol);
+      }
+
+      // Crear nuevo usuario con ese rol
+      usuario = this.usuarioRepository.create({
+        nom_usu: body.nombre,
+        email_usu: body.email,
+        img_usu: body.foto || '',
+        clave_usu: '', // sin clave, autenticación por Google
+        rol_usu: rol,
+        esta_usu: 'Activo',
+      });
+
+      usuario = await this.usuarioRepository.save(usuario);
+    }
+
+    const payload = { id: usuario.id_usu, email: usuario.email_usu };
+    const token = this.jwtService.sign(payload);
+
+    return { usuario, token };
+  }
+
+  async crearUsuarioSistemaSiNoExiste(): Promise<void> {
+    const rolNombre = 'sistema';
+    const correo = 'sistema@local.com';
+    const clave = 'sistema123';
+
+    let rol = await this.rolRepository.findOne({
+      where: { nom_rol: rolNombre },
+    });
+
+    if (!rol) {
+      rol = this.rolRepository.create({
+        nom_rol: rolNombre,
+        desc_rol: 'Rol interno del sistema',
+        est_rol: 'Activo',
+      });
+      await this.rolRepository.save(rol);
+    }
+
+    const existeUsuario = await this.usuarioRepository.findOne({
+      where: { id_usu: 1 },
+    });
+
+    if (existeUsuario) return;
+
+    const encryptedPassword = CryptoJS.AES.encrypt(
+      clave,
+      process.env.AES_SECRET_KEY,
+    ).toString();
+
+    const usuario = this.usuarioRepository.create({
+      id_usu: 1,
+      nom_usu: 'Sistema',
+      email_usu: correo,
+      clave_usu: encryptedPassword,
+      rol_usu: rol,
+      esta_usu: 'Activo',
+      img_usu:
+        'https://firebasestorage.googleapis.com/v0/b/dicolaic-app.appspot.com/o/usuarios%2Fuser-default.webp?alt=media&token=14f267c3-c208-4f2a-88cd-e828147b5f94',
+    });
+
+    await this.usuarioRepository.save(usuario);
+  }
+}

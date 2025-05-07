@@ -1,0 +1,236 @@
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Between, Raw, Repository } from 'typeorm';
+import { Cierre_Dia } from './cierre_dia.entity';
+import { CreateCierreDiarioDto } from './dto/create-cierreDiario.dto';
+import { Venta } from 'src/ventas/venta.entity';
+import { Gasto } from 'src/gastos/gasto.entity';
+import { Compras } from 'src/compras/compras.entity';
+import { FiltroCierreDto } from './dto/filtro-cierre.dto';
+
+@Injectable()
+export class CierreDiaService {
+  private readonly logger = new Logger(CierreDiaService.name);
+
+  constructor(
+    @InjectRepository(Cierre_Dia)
+    private readonly cierreRepository: Repository<Cierre_Dia>,
+    @InjectRepository(Venta)
+    private readonly ventaRepository: Repository<Venta>,
+    @InjectRepository(Gasto)
+    private readonly gastoRepository: Repository<Gasto>,
+    @InjectRepository(Compras)
+    private readonly compraRepository: Repository<Compras>,
+  ) {}
+
+  async crearCierre(
+    createCierreDiarioDto: CreateCierreDiarioDto,
+  ): Promise<Cierre_Dia> {
+    const { usu_cier, ...restoDatos } = createCierreDiarioDto;
+    const nuevoCierre = this.cierreRepository.create({
+      ...restoDatos,
+      usu_cier: { id_usu: Number(usu_cier) },
+    });
+    return await this.cierreRepository.save(nuevoCierre);
+  }
+
+  async registrarDepositoYCerrar(
+    id_cier: number,
+    datos: {
+      tot_dep_cier: number;
+      comp_dep_cier: string;
+      esta_cier?: string;
+    },
+  ): Promise<Cierre_Dia> {
+    const cierre = await this.cierreRepository.findOneBy({ id_cier });
+    if (!cierre)
+      throw new NotFoundException(`Cierre con ID ${id_cier} no encontrado`);
+
+    cierre.tot_dep_cier = datos.tot_dep_cier;
+    cierre.comp_dep_cier = datos.comp_dep_cier;
+    cierre.esta_cier = datos.esta_cier ?? cierre.esta_cier;
+
+    cierre.dif_cier =
+      Number(cierre.tot_vent_cier) -
+      (Number(cierre.tot_gas_cier) +
+        Number(cierre.tot_compras_pag_cier) +
+        Number(cierre.tot_dep_cier));
+
+    return await this.cierreRepository.save(cierre);
+  }
+
+  async listarTodosCierres(filtro?: FiltroCierreDto): Promise<Cierre_Dia[]> {
+    const where: any = {};
+    if (filtro?.desde && filtro?.hasta) {
+      where.fech_cier = Between(filtro.desde, filtro.hasta);
+    }
+    if (filtro?.estado) {
+      where.esta_cier = filtro.estado;
+    }
+
+    return await this.cierreRepository.find({
+      where,
+      order: { fech_cier: 'DESC' },
+    });
+  }
+
+  async listarCierresPorCerrar(
+    filtro?: FiltroCierreDto,
+  ): Promise<Cierre_Dia[]> {
+    const where: any = { esta_cier: 'por cerrar' };
+    if (filtro?.desde && filtro?.hasta) {
+      where.fech_cier = Between(filtro.desde, filtro.hasta);
+    }
+
+    return await this.cierreRepository.find({
+      where,
+      order: { fech_cier: 'DESC' },
+    });
+  }
+
+  async obtenerResumenDelDia(fecha: string) {
+    const resumen = await this.obtenerMovimientosDelDia(fecha);
+    const { totalVentas, totalGastos, totalComprasPagadas } = resumen;
+
+    if (totalVentas === 0 && totalGastos === 0 && totalComprasPagadas === 0) {
+      this.logger.warn(
+        `⚠️ No se encontraron registros de ventas, gastos o compras pagadas para la fecha ${fecha}`,
+      );
+    }
+
+    return resumen;
+  }
+
+  async obtenerMovimientosDelDia(fecha: string) {
+    const [year, month, day] = fecha.split('-').map(Number);
+    const inicioDia = new Date(year, month - 1, day, 0, 0, 0);
+    const finDia = new Date(year, month - 1, day, 23, 59, 59, 999);
+
+    const ventas = await this.ventaRepository.find({
+      where: { fech_vent: Between(inicioDia, finDia) },
+    });
+
+    const gastos = await this.gastoRepository.find({
+      where: { fech_gas: Between(inicioDia, finDia) },
+    });
+
+    const compras = await this.compraRepository.find({
+      where: {
+        fech_comp: Between(inicioDia, finDia),
+        estado_pag_comp: 'pagada',
+      },
+    });
+
+    const totalVentas = ventas.reduce(
+      (sum, venta) => sum + Number(venta.tot_vent || 0),
+      0,
+    );
+
+    const totalGastos = gastos.reduce(
+      (sum, gasto) => sum + Number(gasto.mont_gas || 0),
+      0,
+    );
+
+    const totalComprasPagadas = compras.reduce(
+      (sum, comp) => sum + Number(comp.tot_comp || 0),
+      0,
+    );
+
+    return {
+      ventas,
+      gastos,
+      compras,
+      totalVentas,
+      totalGastos,
+      totalComprasPagadas,
+    };
+  }
+
+  async actualizarResumenDelDia(fecha: string): Promise<void> {
+    const resumen = await this.obtenerMovimientosDelDia(fecha);
+    const { totalVentas, totalGastos, totalComprasPagadas } = resumen;
+
+    const cierreExistente = await this.cierreRepository.findOne({
+      where: { fech_cier: fecha, esta_cier: 'por cerrar' },
+    });
+
+    const totalDepositado = cierreExistente?.tot_dep_cier ?? 0;
+    const diferenciaCalculada =
+      totalVentas - totalGastos - totalComprasPagadas - totalDepositado;
+
+    const datosActualizados = {
+      tot_vent_cier: totalVentas,
+      tot_gas_cier: totalGastos,
+      tot_compras_pag_cier: totalComprasPagadas,
+      dif_cier: diferenciaCalculada,
+    };
+
+    if (cierreExistente) {
+      await this.cierreRepository.update(
+        cierreExistente.id_cier,
+        datosActualizados,
+      );
+      this.logger.log(`🔄 Cierre del día ${fecha} actualizado correctamente.`);
+    } else {
+      await this.cierreRepository.insert({
+        fech_cier: fecha,
+        esta_cier: 'por cerrar',
+        tot_dep_cier: 0,
+        ...datosActualizados,
+      });
+      this.logger.log(`✅ Nuevo cierre creado para el día ${fecha}.`);
+    }
+  }
+
+  async verificarOCrearCierreSiNoExiste(fecha: string): Promise<void> {
+    const yaExiste = await this.existeCierrePorFecha(fecha);
+    if (yaExiste) return;
+
+    const resumen = await this.obtenerResumenDelDia(fecha);
+    const nuevoCierre = {
+      fech_cier: fecha,
+      tot_vent_cier: resumen.totalVentas,
+      tot_gas_cier: resumen.totalGastos,
+      tot_compras_pag_cier: resumen.totalComprasPagadas,
+      tot_dep_cier: 0,
+      dif_cier:
+        resumen.totalVentas - resumen.totalGastos - resumen.totalComprasPagadas,
+      fech_reg_cier: new Date().toISOString(),
+      usu_cier: 1,
+      esta_cier: 'por cerrar',
+    };
+
+    await this.crearCierre(nuevoCierre);
+    this.logger.log(`✅ [Auto] Cierre creado para ${fecha}`);
+  }
+
+  async buscarCierrePorId(id: number): Promise<Cierre_Dia> {
+    const cierre = await this.cierreRepository.findOne({
+      where: { id_cier: id },
+    });
+    if (!cierre)
+      throw new NotFoundException(`Cierre con ID ${id} no encontrado`);
+    return cierre;
+  }
+
+  async actualizarEstadoCierre(id: number, nuevoEstado: string): Promise<void> {
+    await this.cierreRepository.update(id, { esta_cier: nuevoEstado });
+  }
+
+  async eliminarCierre(id: number): Promise<void> {
+    const cierre = await this.buscarCierrePorId(id);
+    await this.cierreRepository.remove(cierre);
+  }
+
+  async existeCierrePorFecha(fecha: string): Promise<boolean> {
+    const cierre = await this.cierreRepository.findOne({
+      where: { fech_cier: fecha },
+    });
+    return !!cierre;
+  }
+}
