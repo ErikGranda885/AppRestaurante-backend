@@ -42,8 +42,10 @@ export class GastosService {
 
     const gastoGuardado = await this.gastoRepository.save(gasto);
 
-    // ✅ Actualizar resumen del día
-    await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fecha);
+    const yaExiste = await this.cierreDiaService.existeCierrePorFecha(fecha);
+    if (!yaExiste) {
+      await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fecha);
+    }
     await this.cierreDiaService.actualizarResumenDelDia(fecha);
 
     return gastoGuardado;
@@ -102,8 +104,10 @@ export class GastosService {
 
     const actualizado = await this.gastoRepository.save(gastoActualizado);
 
-    // ✅ Actualizar el resumen del día
-    await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fecha);
+    const yaExiste = await this.cierreDiaService.existeCierrePorFecha(fecha);
+    if (!yaExiste) {
+      await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fecha);
+    }
     await this.cierreDiaService.actualizarResumenDelDia(fecha);
 
     return actualizado;
@@ -124,12 +128,11 @@ export class GastosService {
         `No se puede eliminar un gasto de un día cerrado (${fecha}).`,
       );
     }
-
-    // 🗑️ Eliminar primero
     await this.gastoRepository.remove(gasto);
-
-    // ✅ Luego verificar y actualizar el cierre
-    await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fecha);
+    const yaExiste = await this.cierreDiaService.existeCierrePorFecha(fecha);
+    if (!yaExiste) {
+      await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fecha);
+    }
     await this.cierreDiaService.actualizarResumenDelDia(fecha);
   }
 

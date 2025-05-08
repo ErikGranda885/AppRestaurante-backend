@@ -80,7 +80,11 @@ export class ComprasService {
 
       // ✅ Solo actualizar cierre si la compra fue pagada
       if (compraGuardada.estado_pag_comp === 'pagada') {
-        await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fecha);
+        const yaExiste =
+          await this.cierreDiaService.existeCierrePorFecha(fecha);
+        if (!yaExiste) {
+          await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fecha);
+        }
         await this.cierreDiaService.actualizarResumenDelDia(fecha);
       }
 
@@ -186,9 +190,13 @@ export class ComprasService {
 
     // ✅ Actualizar resumen del cierre
     try {
-      await this.cierreDiaService.verificarOCrearCierreSiNoExiste(
-        fechaFormateada,
-      );
+      const yaExiste =
+        await this.cierreDiaService.existeCierrePorFecha(fechaFormateada);
+      if (!yaExiste) {
+        await this.cierreDiaService.verificarOCrearCierreSiNoExiste(
+          fechaFormateada,
+        );
+      }
       await this.cierreDiaService.actualizarResumenDelDia(fechaFormateada);
     } catch (error) {
       throw new InternalServerErrorException(

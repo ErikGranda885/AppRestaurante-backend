@@ -48,9 +48,44 @@ export class CierreDiaService {
     },
   ): Promise<Cierre_Dia> {
     const cierre = await this.cierreRepository.findOneBy({ id_cier });
-    if (!cierre)
+    if (!cierre) {
       throw new NotFoundException(`Cierre con ID ${id_cier} no encontrado`);
+    }
 
+    const fecha = cierre.fech_cier;
+    const [year, month, day] = fecha.split('-').map(Number);
+    const inicioDia = new Date(year, month - 1, day, 0, 0, 0);
+    const finDia = new Date(year, month - 1, day, 23, 59, 59, 999);
+
+    // 🚨 Buscar transferencias del día en estado "Por validar"
+    const transferenciasPendientes = await this.ventaRepository.find({
+      where: {
+        fech_vent: Between(inicioDia, finDia),
+        tip_pag_vent: 'transferencia',
+        est_vent: 'Por validar',
+      },
+    });
+
+    if (transferenciasPendientes.length > 0) {
+      throw new BadRequestException(
+        `No se puede cerrar el día ${fecha}. Existen ${transferenciasPendientes.length} transferencias sin validar.`,
+      );
+    }
+
+    // ✅ Buscar ventas efectivas no cerradas
+    const ventasPorCerrar = await this.ventaRepository.find({
+      where: {
+        fech_vent: Between(inicioDia, finDia),
+        est_vent: 'Sin cerrar', // Efectivo que aún no ha sido cerrado
+      },
+    });
+
+    for (const venta of ventasPorCerrar) {
+      venta.est_vent = 'Cerrada';
+      await this.ventaRepository.save(venta);
+    }
+
+    // 💾 Continuar con el registro del cierre
     cierre.tot_dep_cier = datos.tot_dep_cier;
     cierre.comp_dep_cier = datos.comp_dep_cier;
     cierre.esta_cier = datos.esta_cier ?? cierre.esta_cier;
@@ -152,46 +187,80 @@ export class CierreDiaService {
   }
 
   async actualizarResumenDelDia(fecha: string): Promise<void> {
-    const resumen = await this.obtenerMovimientosDelDia(fecha);
-    const { totalVentas, totalGastos, totalComprasPagadas } = resumen;
-
     const cierreExistente = await this.cierreRepository.findOne({
-      where: { fech_cier: fecha, esta_cier: 'por cerrar' },
+      where: { fech_cier: fecha },
     });
 
-    const totalDepositado = cierreExistente?.tot_dep_cier ?? 0;
-    const diferenciaCalculada =
-      totalVentas - totalGastos - totalComprasPagadas - totalDepositado;
-
-    const datosActualizados = {
-      tot_vent_cier: totalVentas,
-      tot_gas_cier: totalGastos,
-      tot_compras_pag_cier: totalComprasPagadas,
-      dif_cier: diferenciaCalculada,
-    };
-
-    if (cierreExistente) {
-      await this.cierreRepository.update(
-        cierreExistente.id_cier,
-        datosActualizados,
-      );
-      this.logger.log(`🔄 Cierre del día ${fecha} actualizado correctamente.`);
-    } else {
+    if (!cierreExistente) {
+      const resumen = await this.obtenerMovimientosDelDia(fecha);
       await this.cierreRepository.insert({
         fech_cier: fecha,
         esta_cier: 'por cerrar',
         tot_dep_cier: 0,
-        ...datosActualizados,
+        tot_vent_cier: resumen.totalVentas,
+        tot_gas_cier: resumen.totalGastos,
+        tot_compras_pag_cier: resumen.totalComprasPagadas,
+        dif_cier:
+          resumen.totalVentas -
+          resumen.totalGastos -
+          resumen.totalComprasPagadas,
       });
       this.logger.log(`✅ Nuevo cierre creado para el día ${fecha}.`);
+      return;
     }
+
+    // ❌ Solo bloquea si ya está cerrado
+    if (cierreExistente.esta_cier === 'cerrado') {
+      this.logger.warn(
+        `⚠️ El cierre del ${fecha} ya está en estado 'cerrado', no se actualizará.`,
+      );
+      return;
+    }
+
+    // ✅ Permite actualizar si está en "por cerrar" o "pendiente"
+    const resumen = await this.obtenerMovimientosDelDia(fecha);
+    const totalDepositado = cierreExistente?.tot_dep_cier ?? 0;
+    const diferenciaCalculada =
+      resumen.totalVentas -
+      resumen.totalGastos -
+      resumen.totalComprasPagadas -
+      totalDepositado;
+
+    const datosActualizados = {
+      tot_vent_cier: resumen.totalVentas,
+      tot_gas_cier: resumen.totalGastos,
+      tot_compras_pag_cier: resumen.totalComprasPagadas,
+      dif_cier: diferenciaCalculada,
+    };
+
+    await this.cierreRepository.update(
+      cierreExistente.id_cier,
+      datosActualizados,
+    );
+    this.logger.log(
+      `🔄 Cierre del día ${fecha} en estado '${cierreExistente.esta_cier}' actualizado correctamente.`,
+    );
   }
 
   async verificarOCrearCierreSiNoExiste(fecha: string): Promise<void> {
-    const yaExiste = await this.existeCierrePorFecha(fecha);
-    if (yaExiste) return;
+    const cierreExistente = await this.cierreRepository.findOne({
+      where: { fech_cier: fecha },
+    });
 
-    // ⚠️ NUEVA VALIDACIÓN: Verifica que no haya pendientes anteriores
+    if (cierreExistente) {
+      if (cierreExistente.esta_cier === 'pendiente') {
+        this.logger.warn(
+          `⚠️ El cierre del ${fecha} ya existe y está en estado 'pendiente'. Se recomienda continuar el registro en ese cierre.`,
+        );
+      } else {
+        this.logger.log(
+          `ℹ️ Ya existe un cierre para ${fecha} con estado '${cierreExistente.esta_cier}', no se creará otro.`,
+        );
+      }
+      return;
+    }
+
+    // ⚠️ Verifica que no haya cierres anteriores pendientes
     const hayPendientes = await this.existenPendientesAnteriores(fecha);
     if (hayPendientes) {
       this.logger.warn(
