@@ -91,4 +91,11 @@ export class DetCompraService {
       );
     }
   }
+
+  // Obtener todos los detalles de todas las compras
+  async obtenerTodosLosDetalles(): Promise<Det_Compra[]> {
+    return await this.detCompraRepository.find({
+      relations: ['comp_dcom', 'prod_dcom'],
+    });
+  }
 }

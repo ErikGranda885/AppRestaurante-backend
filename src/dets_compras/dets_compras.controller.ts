@@ -1,22 +1,18 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Body,
-  Param,
-  Put,
-} from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param } from '@nestjs/common';
 
 import { Det_Compra } from './det_compra.entity';
 import { DetCompraService } from './dets_compras.service';
 import { CreateDetCompraDto } from './dto/create-det_compra.dto';
-import { UpdateDetCompraDto } from './dto/update-det_compra.dto';
 
-@Controller('detCompras')
+@Controller('dets-compras')
 export class DetsComprasController {
   constructor(private readonly detCompraService: DetCompraService) {}
+
+  // GET /dets-compras
+  @Get()
+  async findAll(): Promise<Det_Compra[]> {
+    return await this.detCompraService.obtenerTodosLosDetalles();
+  }
 
   // GET /dets-compras/:id
   @Get(':id')
@@ -31,8 +27,6 @@ export class DetsComprasController {
   ): Promise<Det_Compra> {
     return await this.detCompraService.crearDetalleCompra(createDetCompraDto);
   }
-
-  
 
   // DELETE /dets-compras/:id
   @Delete(':id')
