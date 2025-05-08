@@ -191,7 +191,23 @@ export class CierreDiaService {
     const yaExiste = await this.existeCierrePorFecha(fecha);
     if (yaExiste) return;
 
+    // ⚠️ NUEVA VALIDACIÓN: Verifica que no haya pendientes anteriores
+    const hayPendientes = await this.existenPendientesAnteriores(fecha);
+    if (hayPendientes) {
+      this.logger.warn(
+        `🚫 No se puede crear cierre para ${fecha} porque hay cierres anteriores pendientes.`,
+      );
+      return;
+    }
+
     const resumen = await this.obtenerResumenDelDia(fecha);
+
+    const ahoraLocal = new Date();
+    ahoraLocal.setMinutes(
+      ahoraLocal.getMinutes() - ahoraLocal.getTimezoneOffset(),
+    );
+    const fech_reg_local = ahoraLocal.toISOString();
+
     const nuevoCierre = {
       fech_cier: fecha,
       tot_vent_cier: resumen.totalVentas,
@@ -200,7 +216,7 @@ export class CierreDiaService {
       tot_dep_cier: 0,
       dif_cier:
         resumen.totalVentas - resumen.totalGastos - resumen.totalComprasPagadas,
-      fech_reg_cier: new Date().toISOString(),
+      fech_reg_cier: fech_reg_local,
       usu_cier: 1,
       esta_cier: 'por cerrar',
     };
@@ -240,5 +256,15 @@ export class CierreDiaService {
     });
 
     return cierre?.esta_cier === 'cerrado';
+  }
+
+  async existenPendientesAnteriores(fecha: string): Promise<boolean> {
+    const anteriores = await this.cierreRepository.find({
+      where: {
+        esta_cier: 'pendiente',
+        fech_cier: Raw((alias) => `${alias} < :fecha`, { fecha }),
+      },
+    });
+    return anteriores.length > 0;
   }
 }

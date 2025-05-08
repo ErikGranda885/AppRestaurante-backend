@@ -64,28 +64,22 @@ export class ComprasService {
     try {
       const nuevaCompra = this.comprasRepository.create(createCompraDto);
 
-      // 🛡️ Validar si la fecha está cerrada (solo si es una compra pagada)
-      if (createCompraDto.estado_pag_comp === 'pagada') {
-        const fecha = new Date(createCompraDto.fech_comp)
-          .toISOString()
-          .split('T')[0];
+      // 🛡️ Validar SIEMPRE si la fecha está cerrada (no se permite ninguna compra)
+      const fecha = new Date(createCompraDto.fech_comp)
+        .toISOString()
+        .split('T')[0];
 
-        const diaCerrado = await this.cierreDiaService.esDiaCerrado(fecha);
-        if (diaCerrado) {
-          throw new BadRequestException(
-            `No se pueden registrar compras pagadas en un día cerrado (${fecha}).`,
-          );
-        }
+      const diaCerrado = await this.cierreDiaService.esDiaCerrado(fecha);
+      if (diaCerrado) {
+        throw new BadRequestException(
+          `No se pueden registrar compras en un día cerrado (${fecha}).`,
+        );
       }
 
       const compraGuardada = await this.comprasRepository.save(nuevaCompra);
 
       // ✅ Solo actualizar cierre si la compra fue pagada
       if (compraGuardada.estado_pag_comp === 'pagada') {
-        const fecha = new Date(compraGuardada.fech_comp)
-          .toISOString()
-          .split('T')[0];
-
         await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fecha);
         await this.cierreDiaService.actualizarResumenDelDia(fecha);
       }

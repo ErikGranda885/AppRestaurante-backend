@@ -59,6 +59,17 @@ export class TareasService implements OnModuleInit {
 
   private async ejecutarCreacionCierreDiario() {
     const fecha = this.obtenerFechaLocal();
+
+    // Verifica que no haya pendientes anteriores antes de crear
+    const anterioresPendientes =
+      await this.cierreService.existenPendientesAnteriores(fecha);
+    if (anterioresPendientes) {
+      this.logger.warn(
+        `No se puede crear cierre para ${fecha} porque hay cierres anteriores pendientes.`,
+      );
+      return;
+    }
+
     await this.cierreService.verificarOCrearCierreSiNoExiste(fecha);
   }
 
