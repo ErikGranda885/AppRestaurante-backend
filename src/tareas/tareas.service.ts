@@ -97,36 +97,6 @@ export class TareasService implements OnModuleInit {
       });
   }
 
-  private async crearCierreDiarioSiNoExiste(fecha: string, resumen: any) {
-    const cierresHoy = await this.cierreService.listarCierresPorCerrar({
-      desde: fecha,
-      hasta: fecha,
-    });
-
-    if (cierresHoy.length > 0) {
-      this.logger.warn(
-        `⚠️ Ya existe un cierre con estado 'por cerrar' para ${fecha}`,
-      );
-      return;
-    }
-
-    const nuevoCierre = {
-      fech_cier: fecha,
-      tot_vent_cier: resumen.totalVentas,
-      tot_gas_cier: resumen.totalGastos,
-      tot_compras_pag_cier: resumen.totalComprasPagadas,
-      tot_dep_cier: 0,
-      dif_cier:
-        resumen.totalVentas - resumen.totalGastos - resumen.totalComprasPagadas,
-      fech_reg_cier: new Date().toISOString(),
-      usu_cier: 1,
-      esta_cier: 'por cerrar',
-    };
-
-    await this.cierreService.crearCierre(nuevoCierre);
-    this.logger.log(`✅ Cierre creado con estado 'por cerrar' para ${fecha}`);
-  }
-
   private async verificarCierreYActualizarEstado(fecha: string) {
     const cierres = await this.cierreService.listarCierresPorCerrar({
       desde: fecha,

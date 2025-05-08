@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -62,6 +63,21 @@ export class ComprasService {
   async crearCompra(createCompraDto: CreateCompraDto): Promise<Compras> {
     try {
       const nuevaCompra = this.comprasRepository.create(createCompraDto);
+
+      // 🛡️ Validar si la fecha está cerrada (solo si es una compra pagada)
+      if (createCompraDto.estado_pag_comp === 'pagada') {
+        const fecha = new Date(createCompraDto.fech_comp)
+          .toISOString()
+          .split('T')[0];
+
+        const diaCerrado = await this.cierreDiaService.esDiaCerrado(fecha);
+        if (diaCerrado) {
+          throw new BadRequestException(
+            `No se pueden registrar compras pagadas en un día cerrado (${fecha}).`,
+          );
+        }
+      }
+
       const compraGuardada = await this.comprasRepository.save(nuevaCompra);
 
       // ✅ Solo actualizar cierre si la compra fue pagada
@@ -69,6 +85,8 @@ export class ComprasService {
         const fecha = new Date(compraGuardada.fech_comp)
           .toISOString()
           .split('T')[0];
+
+        await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fecha);
         await this.cierreDiaService.actualizarResumenDelDia(fecha);
       }
 
@@ -87,12 +105,37 @@ export class ComprasService {
     updateCompraDto: UpdateCompraDto,
   ): Promise<Compras> {
     const compra = await this.obtenerCompra(id);
+
+    const fecha = new Date(compra.fech_comp).toISOString().split('T')[0];
+
+    // 🛡️ Validar si el día está cerrado (solo si está pagada)
+    if (compra.estado_pag_comp === 'pagada') {
+      if (await this.cierreDiaService.esDiaCerrado(fecha)) {
+        throw new BadRequestException(
+          `No se puede modificar una compra pagada de un día cerrado (${fecha}).`,
+        );
+      }
+    }
+
     const compraActualizada = Object.assign(compra, updateCompraDto);
     return await this.comprasRepository.save(compraActualizada);
   }
 
   // Eliminar una compra
   async remove(id: number): Promise<void> {
+    const compra = await this.obtenerCompra(id);
+
+    const fecha = new Date(compra.fech_comp).toISOString().split('T')[0];
+
+    // 🛡️ Validar si el día está cerrado (solo si está pagada)
+    if (compra.estado_pag_comp === 'pagada') {
+      if (await this.cierreDiaService.esDiaCerrado(fecha)) {
+        throw new BadRequestException(
+          `No se puede eliminar una compra pagada de un día cerrado (${fecha}).`,
+        );
+      }
+    }
+
     const result = await this.comprasRepository.delete(id);
     if (result.affected === 0) {
       throw new NotFoundException(`Compra con id ${id} no encontrada`);
@@ -109,6 +152,15 @@ export class ComprasService {
     },
   ): Promise<Compras> {
     const compra = await this.obtenerCompra(id);
+
+    const fechaFormateada = format(new Date(compra.fech_comp), 'yyyy-MM-dd');
+
+    // 🛡️ Validar si el día está cerrado
+    if (await this.cierreDiaService.esDiaCerrado(fechaFormateada)) {
+      throw new BadRequestException(
+        `No se puede registrar el pago porque el día ya está cerrado (${fechaFormateada}).`,
+      );
+    }
 
     // ✅ Actualizar estado de pago y general
     compra.estado_pag_comp = 'pagada';
@@ -138,12 +190,8 @@ export class ComprasService {
 
     const compraActualizada = await this.comprasRepository.save(compra);
 
-    // ✅ FORMATEAR FECHA para búsqueda exacta del cierre
+    // ✅ Actualizar resumen del cierre
     try {
-      const fechaFormateada = format(
-        new Date(compraActualizada.fech_comp),
-        'yyyy-MM-dd',
-      );
       await this.cierreDiaService.verificarOCrearCierreSiNoExiste(
         fechaFormateada,
       );

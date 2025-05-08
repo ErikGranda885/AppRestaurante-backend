@@ -233,4 +233,12 @@ export class CierreDiaService {
     });
     return !!cierre;
   }
+
+  async esDiaCerrado(fecha: string): Promise<boolean> {
+    const cierre = await this.cierreRepository.findOne({
+      where: { fech_cier: fecha },
+    });
+
+    return cierre?.esta_cier === 'cerrado';
+  }
 }

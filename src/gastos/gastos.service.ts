@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, Repository } from 'typeorm';
 import { CreateGastoDto } from './dto/create-gasto.dto';
@@ -16,19 +20,29 @@ export class GastosService {
   ) {}
 
   async crearGasto(createGastoDto: CreateGastoDto): Promise<Gasto> {
+    const fechaGasto = createGastoDto.fech_gas
+      ? new Date(createGastoDto.fech_gas)
+      : new Date();
+
+    const fecha = fechaGasto.toISOString().split('T')[0];
+
+    // 🛡️ Validar si el día ya está cerrado
+    if (await this.cierreDiaService.esDiaCerrado(fecha)) {
+      throw new BadRequestException(
+        `No se pueden registrar gastos en un día cerrado (${fecha}).`,
+      );
+    }
+
     const gasto = this.gastoRepository.create({
       desc_gas: createGastoDto.desc_gas,
       mont_gas: createGastoDto.mont_gas,
-      fech_gas: createGastoDto.fech_gas
-        ? new Date(createGastoDto.fech_gas)
-        : new Date(),
+      fech_gas: fechaGasto,
       obs_gas: createGastoDto.obs_gas ?? '',
     });
 
     const gastoGuardado = await this.gastoRepository.save(gasto);
 
     // ✅ Actualizar resumen del día
-    const fecha = gastoGuardado.fech_gas.toISOString().split('T')[0];
     await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fecha);
     await this.cierreDiaService.actualizarResumenDelDia(fecha);
 
@@ -67,6 +81,15 @@ export class GastosService {
       throw new NotFoundException(`Gasto con ID ${id} no encontrado`);
     }
 
+    const fecha = gastoExistente.fech_gas.toISOString().split('T')[0];
+
+    // 🛡️ Validar si el día ya está cerrado
+    if (await this.cierreDiaService.esDiaCerrado(fecha)) {
+      throw new BadRequestException(
+        `No se puede modificar un gasto de un día cerrado (${fecha}).`,
+      );
+    }
+
     // ⚡ Eliminar la propiedad fech_gas si viene en el DTO
     if ('fech_gas' in updateGastoDto) {
       delete updateGastoDto.fech_gas;
@@ -80,7 +103,6 @@ export class GastosService {
     const actualizado = await this.gastoRepository.save(gastoActualizado);
 
     // ✅ Actualizar el resumen del día
-    const fecha = gastoExistente.fech_gas.toISOString().split('T')[0];
     await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fecha);
     await this.cierreDiaService.actualizarResumenDelDia(fecha);
 
@@ -95,6 +117,13 @@ export class GastosService {
     }
 
     const fecha = gasto.fech_gas.toISOString().split('T')[0];
+
+    // 🛡️ Validar si el día ya está cerrado
+    if (await this.cierreDiaService.esDiaCerrado(fecha)) {
+      throw new BadRequestException(
+        `No se puede eliminar un gasto de un día cerrado (${fecha}).`,
+      );
+    }
 
     // 🗑️ Eliminar primero
     await this.gastoRepository.remove(gasto);

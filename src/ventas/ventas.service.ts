@@ -70,13 +70,22 @@ export class VentasService {
       }
     }
 
+    // 🛡️ VALIDACIÓN DE CIERRE
+    const fechaVenta = new Date(fech_vent).toISOString().split('T')[0];
+
+    const diaCerrado = await this.cierreDiaService.esDiaCerrado(fechaVenta);
+    if (diaCerrado) {
+      throw new BadRequestException(
+        `No se pueden registrar ventas en un día cerrado (${fechaVenta}).`,
+      );
+    }
+
     const venta = new Venta();
     venta.usu_vent = usuario;
     venta.tot_vent = tot_vent;
     venta.fech_vent = fech_vent;
     venta.est_vent =
       tip_pag_vent === 'transferencia' ? 'Por validar' : 'Sin cerrar';
-
     venta.tip_pag_vent = tip_pag_vent;
 
     if (tip_pag_vent === 'transferencia') {
@@ -92,7 +101,6 @@ export class VentasService {
     const ventaGuardada = await this.ventaRepository.save(venta);
 
     // ✅ ACTUALIZAR RESUMEN DEL CIERRE
-    const fechaVenta = new Date(fech_vent).toISOString().split('T')[0];
     await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fechaVenta);
     await this.cierreDiaService.actualizarResumenDelDia(fechaVenta);
 
