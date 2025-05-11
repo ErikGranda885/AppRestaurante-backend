@@ -27,6 +27,9 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { TareasService } from './tareas/tareas.service';
 import { DashboardService } from './dashboard/dashboard.service';
 import { DashboardController } from './dashboard/dashboard.controller';
+import { EmpresasService } from './empresas/empresas.service';
+import { EmpresasController } from './empresas/empresas.controller';
+import { EmpresasModule } from './empresas/empresas.module';
 
 @Module({
   imports: [
@@ -56,6 +59,7 @@ import { DashboardController } from './dashboard/dashboard.controller';
     InventarioModule,
     GastoModule,
     CierreDiaModule,
+    EmpresasModule,
     ScheduleModule.forRoot(),
   ],
   controllers: [
