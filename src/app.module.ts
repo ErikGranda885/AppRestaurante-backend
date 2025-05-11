@@ -27,8 +27,6 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { TareasService } from './tareas/tareas.service';
 import { DashboardService } from './dashboard/dashboard.service';
 import { DashboardController } from './dashboard/dashboard.controller';
-import { EmpresasService } from './empresas/empresas.service';
-import { EmpresasController } from './empresas/empresas.controller';
 import { EmpresasModule } from './empresas/empresas.module';
 
 @Module({
@@ -42,7 +40,7 @@ import { EmpresasModule } from './empresas/empresas.module';
       password: process.env.DB_PASSWORD,
       database: process.env.DB_DATABASE,
       entities: ['dist/**/*.entity{.ts,.js}'],
-      synchronize: true,
+      synchronize: true
     }),
     UsuariosModule,
     CategoriasModule,
