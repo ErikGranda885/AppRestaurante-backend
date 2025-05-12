@@ -40,7 +40,7 @@ import { EmpresasModule } from './empresas/empresas.module';
       password: process.env.DB_PASSWORD,
       database: process.env.DB_DATABASE,
       entities: ['dist/**/*.entity{.ts,.js}'],
-      synchronize: true
+      synchronize: true,
     }),
     UsuariosModule,
     CategoriasModule,

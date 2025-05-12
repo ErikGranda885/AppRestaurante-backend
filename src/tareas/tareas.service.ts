@@ -4,6 +4,7 @@ import { CierreDiaService } from 'src/cierre_dia/cierre_dia.service';
 import { ConfigService } from '@nestjs/config';
 import { CronJob } from 'cron';
 import { UsuariosService } from 'src/usuarios/usuarios.service';
+import { ConfiguracionesService } from 'src/configuraciones/configuraciones.service';
 
 @Injectable()
 export class TareasService implements OnModuleInit {
@@ -14,41 +15,9 @@ export class TareasService implements OnModuleInit {
     private configService: ConfigService,
     private schedulerRegistry: SchedulerRegistry,
     private usuariosService: UsuariosService,
+    private configuracionesService: ConfiguracionesService,
   ) {}
 
-  private registrarCronJob(
-    hora: string | undefined,
-    nombre: string,
-    tarea: () => Promise<void>,
-  ) {
-    if (!hora) {
-      this.logger.warn(
-        `⚠️ La variable de hora para '${nombre}' no está definida.`,
-      );
-      return;
-    }
-
-    const [h, m] = hora.split(':').map(Number);
-    if (isNaN(h) || isNaN(m)) {
-      this.logger.error(
-        `❌ La hora de '${nombre}' tiene formato inválido. Usa HH:mm`,
-      );
-      return;
-    }
-
-    const expresion = `${m} ${h} * * *`;
-
-    const job = new CronJob(expresion, async () => {
-      await tarea();
-    });
-
-    this.schedulerRegistry.addCronJob(nombre, job);
-    job.start();
-
-    this.logger.log(`⏱️ Tarea '${nombre}' programada a las ${hora}`);
-  }
-
-  // ✅ NUEVO método para obtener fecha local (no UTC)
   private obtenerFechaLocal(): string {
     const fechaLocal = new Date();
     fechaLocal.setMinutes(
@@ -60,7 +29,6 @@ export class TareasService implements OnModuleInit {
   private async ejecutarCreacionCierreDiario() {
     const fecha = this.obtenerFechaLocal();
 
-    // Verifica que no haya pendientes anteriores antes de crear
     const anterioresPendientes =
       await this.cierreService.existenPendientesAnteriores(fecha);
     if (anterioresPendientes) {
@@ -81,31 +49,69 @@ export class TareasService implements OnModuleInit {
   async onModuleInit() {
     await this.usuariosService.crearUsuarioSistemaSiNoExiste();
 
-    this.registrarCronJob(
-      this.configService.get<string>('CIERRE_CREACION_HORA'),
+    // Mostrar horas actuales antes de registrar los cron jobs
+    const creacionHora = await this.configuracionesService.obtenerValorPorClave(
+      'cierre_creacion_hora',
+    );
+    const verificacionHora =
+      await this.configuracionesService.obtenerValorPorClave(
+        'cierre_verificacion_hora',
+      );
+
+    this.logger.log(
+      `🕒 Configuración de horarios: Creación: ${creacionHora ?? 'no definido'}, Verificación: ${verificacionHora ?? 'no definido'}`,
+    );
+
+    // Registrar cron jobs que escuchan cambios
+    this.registrarDynamicCronJob(
       'cierre-creacion-diaria',
       () => this.ejecutarCreacionCierreDiario(),
+      'cierre_creacion_hora',
     );
 
-    this.registrarCronJob(
-      this.configService.get<string>('CIERRE_VERIFICACION_HORA'),
+    this.registrarDynamicCronJob(
       'cierre-verificacion-diaria',
       () => this.ejecutarVerificacionCierrePendiente(),
+      'cierre_verificacion_hora',
     );
 
-    // 🔄 Verificar si el cierre ya existe al iniciar el servidor
-    this.ejecutarCreacionCierreDiario()
-      .then(() => {
-        this.logger.log(
-          '✅ Verificación de cierre ejecutada al iniciar el sistema',
-        );
-      })
-      .catch((err) => {
-        this.logger.error(
-          '❌ Error al verificar/crear el cierre al iniciar',
-          err,
-        );
-      });
+    // Ejecutar una vez al iniciar
+    await this.ejecutarCreacionCierreDiario();
+  }
+
+  private registrarDynamicCronJob(
+    nombre: string,
+    tarea: () => Promise<void>,
+    claveConfig: string,
+  ) {
+    const job = new CronJob('* * * * *', async () => {
+      try {
+        const horaConfig =
+          await this.configuracionesService.obtenerValorPorClave(claveConfig);
+
+        if (!horaConfig || !horaConfig.includes(':')) return;
+
+        const [h, m] = horaConfig.split(':').map(Number);
+        if (isNaN(h) || isNaN(m)) return;
+
+        const ahora = new Date();
+        if (ahora.getHours() === h && ahora.getMinutes() === m) {
+          this.logger.log(
+            `⏳ Ejecutando tarea '${nombre}' a las ${horaConfig}`,
+          );
+          await tarea();
+        }
+      } catch (error) {
+        this.logger.error(`❌ Error en cron '${nombre}':`, error);
+      }
+    });
+
+    this.schedulerRegistry.addCronJob(nombre, job);
+    job.start();
+
+    this.logger.log(
+      `✅ Cron dinámico '${nombre}' activo (escuchando '${claveConfig}')`,
+    );
   }
 
   private async verificarCierreYActualizarEstado(fecha: string) {

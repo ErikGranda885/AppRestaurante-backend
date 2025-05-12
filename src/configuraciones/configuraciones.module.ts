@@ -8,5 +8,6 @@ import { Configuracion } from './configuracion.entity';
   imports: [TypeOrmModule.forFeature([Configuracion])],
   providers: [ConfiguracionesService],
   controllers: [ConfiguracionesController],
+  exports: [ConfiguracionesService],
 })
 export class ConfiguracionesModule {}

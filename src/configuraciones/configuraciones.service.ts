@@ -66,4 +66,12 @@ export class ConfiguracionesService {
 
     return await this.configuracionesRepository.save(configuracion);
   }
+
+  // configuraciones.service.ts
+  async obtenerValorPorClave(clave: string): Promise<string | null> {
+    const config = await this.configuracionesRepository.findOne({
+      where: { clave_conf: clave },
+    });
+    return config?.valor_conf ?? null;
+  }
 }
