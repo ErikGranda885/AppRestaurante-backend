@@ -55,4 +55,7 @@ export class Usuario {
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   img_usu: string;
+
+  @Column({ type: 'int', default: 0, nullable: false })
+  intentos_login: number;
 }

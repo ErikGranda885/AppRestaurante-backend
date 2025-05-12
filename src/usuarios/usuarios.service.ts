@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -12,6 +13,7 @@ import { Rol } from '../roles/rol.entity';
 import * as CryptoJS from 'crypto-js';
 import { JwtService } from '@nestjs/jwt';
 import { LoginUsuarioDto } from './dto/login-usuario.dto';
+import { ConfiguracionesService } from 'src/configuraciones/configuraciones.service';
 
 @Injectable()
 export class UsuariosService {
@@ -22,6 +24,7 @@ export class UsuariosService {
     private rolRepository: Repository<Rol>,
     private dataSource: DataSource,
     private jwtService: JwtService,
+    private configuracionesService: ConfiguracionesService,
   ) {}
   async crearUsuariosMasivo(
     createUsuariosDto: CreateUsuarioDto[],
@@ -113,7 +116,7 @@ export class UsuariosService {
     const usuarioGuardado = await this.usuarioRepository.save(usuario);
     return {
       message: 'Usuario creado correctamente',
-      usuario: usuarioGuardado
+      usuario: usuarioGuardado,
     };
   }
 
@@ -220,26 +223,51 @@ export class UsuariosService {
   ): Promise<{ message: string; usuario: Usuario; token: string }> {
     const { email_usu, clave_usu } = loginUsuarioDto;
 
-    // Buscar al usuario por su correo
     const usuario = await this.usuarioRepository.findOne({
       where: { email_usu },
     });
+
     if (!usuario) {
       throw new NotFoundException(
         `Usuario con correo ${email_usu} no encontrado`,
       );
     }
 
-    // Desencriptar la contraseña almacenada
+    // ✅ Seguridad: bloquear usuario si excedió intentos
+    const bloquear =
+      (await this.configuracionesService.obtenerValorPorClave(
+        'bloquear_usuario_por_intentos',
+      )) === 'true';
+    const maxIntentos = parseInt(
+      (await this.configuracionesService.obtenerValorPorClave(
+        'max_intentos_login',
+      )) ?? '5',
+      10,
+    );
+
+    if (usuario.esta_usu === 'Inactivo') {
+      throw new UnauthorizedException('Usuario bloqueado o inactivo');
+    }
+
     const secretKey = process.env.AES_SECRET_KEY;
     const bytes = CryptoJS.AES.decrypt(usuario.clave_usu, secretKey);
     const decryptedPassword = bytes.toString(CryptoJS.enc.Utf8);
 
     if (decryptedPassword !== clave_usu) {
+      if (bloquear) {
+        usuario.intentos_login = (usuario.intentos_login ?? 0) + 1;
+        if (usuario.intentos_login >= maxIntentos) {
+          usuario.esta_usu = 'Inactivo';
+        }
+        await this.usuarioRepository.save(usuario);
+      }
       throw new BadRequestException('Contraseña incorrecta');
     }
 
-    // Generar el token JWT con el payload que necesites
+    // ✅ Si login exitoso: reiniciar contador de intentos
+    usuario.intentos_login = 0;
+    await this.usuarioRepository.save(usuario);
+
     const payload = { id: usuario.id_usu, email: usuario.email_usu };
     const token = this.jwtService.sign(payload);
 
@@ -251,35 +279,40 @@ export class UsuariosService {
     nombre: string;
     foto?: string;
   }): Promise<{ usuario: Usuario; token: string }> {
+    // ✅ Validar si Google login está habilitado
+    const permitirGoogle =
+      (await this.configuracionesService.obtenerValorPorClave(
+        'activar_google_login',
+      )) === 'true';
+    if (!permitirGoogle) {
+      throw new UnauthorizedException('Inicio con Google deshabilitado');
+    }
+
     let usuario = await this.usuarioRepository.findOne({
       where: { email_usu: body.email },
       relations: ['rol_usu'],
     });
 
     if (!usuario) {
-      // 🔍 Verificar si existe el rol "invitado" con id_rol = 2
       let rol = await this.rolRepository.findOne({
         where: { id_rol: 2 },
       });
 
-      // 🛠 Si no existe, lo crea
       if (!rol) {
         rol = this.rolRepository.create({
           id_rol: 2,
           nom_rol: 'invitado',
-          desc_rol: 'Rol asignado a usuarios registrados por Google',
+          desc_rol: 'Usuario registrado por Google',
           est_rol: 'Activo',
         });
-
         rol = await this.rolRepository.save(rol);
       }
 
-      // Crear nuevo usuario con ese rol
       usuario = this.usuarioRepository.create({
         nom_usu: body.nombre,
         email_usu: body.email,
         img_usu: body.foto || '',
-        clave_usu: '', // sin clave, autenticación por Google
+        clave_usu: '',
         rol_usu: rol,
         esta_usu: 'Activo',
       });

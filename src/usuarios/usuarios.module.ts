@@ -7,15 +7,17 @@ import { Rol } from '../roles/rol.entity';
 import { UsuariosService } from './usuarios.service';
 import { UsuariosController } from './usuarios.controller';
 import { RolesModule } from 'src/roles/roles.module';
+import { ConfiguracionesModule } from 'src/configuraciones/configuraciones.module'; // ✅ importa configuraciones
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Usuario, Rol]),
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'secretKey', // Usa variables de entorno en producción
+      secret: process.env.JWT_SECRET || 'secretKey', // usa variables de entorno en prod
       signOptions: { expiresIn: '1h' },
     }),
-    RolesModule, // Importa el módulo de roles
+    RolesModule,
+    ConfiguracionesModule, // ✅ añade este import para solucionar el error
   ],
   providers: [UsuariosService],
   controllers: [UsuariosController],
