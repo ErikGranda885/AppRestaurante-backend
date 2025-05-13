@@ -279,7 +279,6 @@ export class UsuariosService {
     nombre: string;
     foto?: string;
   }): Promise<{ usuario: Usuario; token: string }> {
-    // ✅ Validar si Google login está habilitado
     const permitirGoogle =
       (await this.configuracionesService.obtenerValorPorClave(
         'activar_google_login',
@@ -288,36 +287,22 @@ export class UsuariosService {
       throw new UnauthorizedException('Inicio con Google deshabilitado');
     }
 
-    let usuario = await this.usuarioRepository.findOne({
+    const usuario = await this.usuarioRepository.findOne({
       where: { email_usu: body.email },
       relations: ['rol_usu'],
     });
 
+    // ✅ CAMBIO: si no existe, NO permitir acceso
     if (!usuario) {
-      let rol = await this.rolRepository.findOne({
-        where: { id_rol: 2 },
-      });
+      throw new UnauthorizedException(
+        `El usuario ${body.email} no está registrado en el sistema.`,
+      );
+    }
 
-      if (!rol) {
-        rol = this.rolRepository.create({
-          id_rol: 2,
-          nom_rol: 'invitado',
-          desc_rol: 'Usuario registrado por Google',
-          est_rol: 'Activo',
-        });
-        rol = await this.rolRepository.save(rol);
-      }
-
-      usuario = this.usuarioRepository.create({
-        nom_usu: body.nombre,
-        email_usu: body.email,
-        img_usu: body.foto || '',
-        clave_usu: '',
-        rol_usu: rol,
-        esta_usu: 'Activo',
-      });
-
-      usuario = await this.usuarioRepository.save(usuario);
+    // ✅ Opcional: actualizar foto si quieres
+    if (body.foto && usuario.img_usu !== body.foto) {
+      usuario.img_usu = body.foto;
+      await this.usuarioRepository.save(usuario);
     }
 
     const payload = { id: usuario.id_usu, email: usuario.email_usu };
