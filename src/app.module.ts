@@ -28,6 +28,12 @@ import { TareasService } from './tareas/tareas.service';
 import { DashboardService } from './dashboard/dashboard.service';
 import { DashboardController } from './dashboard/dashboard.controller';
 import { EmpresasModule } from './empresas/empresas.module';
+import { RecetasController } from './recetas/recetas.controller';
+import { RecetasService } from './recetas/recetas.service';
+import { RecetasModule } from './recetas/recetas.module';
+import { DetsRecetasController } from './dets_recetas/dets_recetas.controller';
+import { DetsRecetasService } from './dets_recetas/dets_recetas.service';
+import { DetsRecetasModule } from './dets_recetas/dets_recetas.module';
 
 @Module({
   imports: [
@@ -59,6 +65,8 @@ import { EmpresasModule } from './empresas/empresas.module';
     CierreDiaModule,
     EmpresasModule,
     ScheduleModule.forRoot(),
+    RecetasModule,
+    DetsRecetasModule,
   ],
   controllers: [
     AppController,
@@ -67,7 +75,9 @@ import { EmpresasModule } from './empresas/empresas.module';
     DetsComprasController,
     PdfController,
     DashboardController,
+    RecetasController,
+    DetsRecetasController,
   ],
-  providers: [AppService, PdfService, TareasService, DashboardService],
+  providers: [AppService, PdfService, TareasService, DashboardService, RecetasService, DetsRecetasService],
 })
 export class AppModule {}
