@@ -28,12 +28,10 @@ import { TareasService } from './tareas/tareas.service';
 import { DashboardService } from './dashboard/dashboard.service';
 import { DashboardController } from './dashboard/dashboard.controller';
 import { EmpresasModule } from './empresas/empresas.module';
-import { RecetasController } from './recetas/recetas.controller';
-import { RecetasService } from './recetas/recetas.service';
 import { RecetasModule } from './recetas/recetas.module';
-import { DetsRecetasController } from './dets_recetas/dets_recetas.controller';
-import { DetsRecetasService } from './dets_recetas/dets_recetas.service';
 import { DetsRecetasModule } from './dets_recetas/dets_recetas.module';
+import { EquivalenciasModule } from './equivalencias/equivalencias.module';
+import { TransformacionesModule } from './transformaciones/transformaciones.module';
 
 @Module({
   imports: [
@@ -67,6 +65,8 @@ import { DetsRecetasModule } from './dets_recetas/dets_recetas.module';
     ScheduleModule.forRoot(),
     RecetasModule,
     DetsRecetasModule,
+    EquivalenciasModule,
+    TransformacionesModule,
   ],
   controllers: [
     AppController,
@@ -75,9 +75,7 @@ import { DetsRecetasModule } from './dets_recetas/dets_recetas.module';
     DetsComprasController,
     PdfController,
     DashboardController,
-    RecetasController,
-    DetsRecetasController,
   ],
-  providers: [AppService, PdfService, TareasService, DashboardService, RecetasService, DetsRecetasService],
+  providers: [AppService, PdfService, TareasService, DashboardService],
 })
 export class AppModule {}

@@ -16,7 +16,7 @@ import {
 export class Usuario {
   @PrimaryGeneratedColumn()
   id_usu: number;
-
+  
   @ManyToOne(() => Rol, (rol) => rol.id_rol, { eager: true })
   @JoinColumn({ name: 'rol_usu' })
   rol_usu: Rol;

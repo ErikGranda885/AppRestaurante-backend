@@ -1,4 +1,5 @@
-import { Producto } from 'src/productos/producto.entity';
+import { Receta } from 'src/recetas/receta.entity';
+import { Usuario } from 'src/usuarios/usuario.entity'; // si manejas usuarios
 import {
   Column,
   Entity,
@@ -12,17 +13,27 @@ export class Transformacion {
   @PrimaryGeneratedColumn()
   id_trans: number;
 
-  @ManyToOne(() => Producto, (producto) => producto.id_prod, { eager: true })
-  @JoinColumn({ name: 'prod_org_trans' })
-  prod_org_trans: Producto;
+  @ManyToOne(() => Receta, (receta) => receta.id_rec, { eager: true })
+  @JoinColumn({ name: 'rece_trans' })
+  rece_trans: Receta;
 
-  @ManyToOne(() => Producto, (producto) => producto.id_prod, { eager: true })
-  @JoinColumn({ name: 'prod_res_trans' })
-  prod_res_trans: Producto;
+  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  cant_prod_trans: number;
 
-  @Column({ type: 'int' })
-  cant_res_trans: number;
+  @Column({
+    type: 'timestamp',
+    default: () => 'CURRENT_TIMESTAMP',
+    nullable: true,
+  })
+  fecha_trans: Date | null;
 
-  @Column({ type: 'varchar' })
-  fech_trans: string;
+  @ManyToOne(() => Usuario, (usuario) => usuario.id_usu, {
+    eager: true,
+    nullable: true,
+  })
+  @JoinColumn({ name: 'id_user' })
+  usu_trans: Usuario;
+
+  @Column({ type: 'text', nullable: true })
+  obse_trans: string | null;
 }

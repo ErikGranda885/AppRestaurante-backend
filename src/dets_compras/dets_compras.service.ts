@@ -7,8 +7,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Det_Compra } from './det_compra.entity';
 import { CreateDetCompraDto } from './dto/create-det_compra.dto';
-import { UpdateDetCompraDto } from './dto/update-det_compra.dto';
 import { Producto } from 'src/productos/producto.entity';
+import { EquivalenciaService } from 'src/equivalencias/equivalencias.service';
 
 @Injectable()
 export class DetCompraService {
@@ -18,6 +18,7 @@ export class DetCompraService {
 
     @InjectRepository(Producto)
     private readonly productoRepository: Repository<Producto>,
+    private readonly equivalenciaService: EquivalenciaService,
   ) {}
 
   // Obtener un detalle de compra por ID
@@ -44,21 +45,7 @@ export class DetCompraService {
             .split('T')[0]
         : null;
 
-      const nuevoDetalle = this.detCompraRepository.create({
-        comp_dcom: { id_comp: createDetCompraDto.comp_dcom } as any,
-        prod_dcom: { id_prod: createDetCompraDto.prod_dcom } as any,
-        cant_dcom: createDetCompraDto.cant_dcom,
-        prec_uni_dcom: createDetCompraDto.prec_uni_dcom,
-        sub_tot_dcom: createDetCompraDto.sub_tot_dcom,
-        fech_ven_prod_dcom: fechaVencimiento,
-        lote_dcom: createDetCompraDto.lote_dcom,
-        cant_usada_dcom: createDetCompraDto.cant_usada_dcom,
-        cant_disponible_dcom: createDetCompraDto.cant_disponible_dcom,
-        est_lote_dcom: createDetCompraDto.est_lote_dcom,
-      });
-
-      const detalleGuardado = await this.detCompraRepository.save(nuevoDetalle);
-
+      // 👉 1. Obtener el producto
       const producto = await this.productoRepository.findOne({
         where: { id_prod: createDetCompraDto.prod_dcom },
       });
@@ -67,7 +54,44 @@ export class DetCompraService {
         throw new NotFoundException('Producto no encontrado');
       }
 
-      producto.stock_prod += createDetCompraDto.cant_dcom;
+      let stockFinal = createDetCompraDto.cant_dcom;
+
+      // 👉 2. Si es insumo, verificar equivalencia y recalcular stock
+      if (producto.tip_prod === 'Insumo') {
+        try {
+          const equivalencia =
+            await this.equivalenciaService.obtenerEquivalenciaActiva(
+              producto.id_prod,
+            );
+          stockFinal = createDetCompraDto.cant_dcom * equivalencia.cant_equiv;
+        } catch (error) {
+          if (error instanceof NotFoundException) {
+            // Si no existe equivalencia, usa la cantidad normal
+            stockFinal = createDetCompraDto.cant_dcom;
+          } else {
+            throw error; // Otro error (DB, etc.)
+          }
+        }
+      }
+
+      // 👉 3. Crear el detalle de compra
+      const nuevoDetalle = this.detCompraRepository.create({
+        comp_dcom: { id_comp: createDetCompraDto.comp_dcom } as any,
+        prod_dcom: { id_prod: createDetCompraDto.prod_dcom } as any,
+        cant_dcom: createDetCompraDto.cant_dcom,
+        prec_uni_dcom: createDetCompraDto.prec_uni_dcom,
+        sub_tot_dcom: createDetCompraDto.sub_tot_dcom,
+        fech_ven_prod_dcom: fechaVencimiento,
+        lote_dcom: createDetCompraDto.lote_dcom,
+        cant_usada_dcom: 0, // 👈 inicial siempre 0
+        cant_disponible_dcom: stockFinal, // 👈 stock real (convertido o no)
+        est_lote_dcom: createDetCompraDto.est_lote_dcom ?? 'vigente',
+      });
+
+      const detalleGuardado = await this.detCompraRepository.save(nuevoDetalle);
+
+      // 👉 4. Actualizar el stock y precios del producto
+      producto.stock_prod += stockFinal; // 👈 suma stock real
       producto.prec_comp_prod = createDetCompraDto.prec_uni_dcom;
       producto.prec_vent_prod = createDetCompraDto.prec_uni_dcom * 1.2;
 
