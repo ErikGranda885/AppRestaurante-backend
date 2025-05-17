@@ -7,7 +7,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { InventarioService } from './inventario.service';
-import { Det_Compra } from 'src/dets_compras/det_compra.entity';
+import { Lote } from 'src/lotes/lote.entity';
 
 @Controller('inventario')
 export class InventarioController {
@@ -26,10 +26,19 @@ export class InventarioController {
       await this.inventarioService.sincronizarYListarProductos();
     return productos;
   }
+
   @Post('consumir')
   async consumirPorLote(
     @Body() body: { id_prod: number; cantidad: number },
-  ): Promise<Det_Compra[]> {
+  ): Promise<
+    {
+      id_lote: number;
+      cantidadConsumida: number;
+      cant_usad_lote: number;
+      cant_disp_lote: number;
+      esta_lote: string;
+    }[]
+  > {
     const { id_prod, cantidad } = body;
 
     if (!id_prod || !cantidad || cantidad <= 0) {

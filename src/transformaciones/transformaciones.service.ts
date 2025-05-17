@@ -4,15 +4,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, MoreThan, Repository } from 'typeorm';
+import { DataSource, In, MoreThan, Repository } from 'typeorm';
 import { Transformacion } from './transformacion.entity';
 import { CreateTransformacionDto } from './dto/create-transformacion.dto';
 import { UpdateTransformacionDto } from './dto/update-transformacion.dto';
 import { Receta } from 'src/recetas/receta.entity';
 import { Usuario } from 'src/usuarios/usuario.entity';
 import { Det_Receta } from 'src/dets_recetas/det_receta.entity';
-import { Det_Compra } from 'src/dets_compras/det_compra.entity';
 import { Producto } from 'src/productos/producto.entity';
+import { LotesService } from 'src/lotes/lotes.service';
+import { EquivalenciaService } from 'src/equivalencias/equivalencias.service';
 
 @Injectable()
 export class TransformacionesService {
@@ -25,119 +26,123 @@ export class TransformacionesService {
     private usuarioRepository: Repository<Usuario>,
     @InjectRepository(Det_Receta)
     private detRecetaRepository: Repository<Det_Receta>,
-    @InjectRepository(Det_Compra)
-    private detCompraRepository: Repository<Det_Compra>,
     @InjectRepository(Producto)
     private productoRepository: Repository<Producto>,
+    private readonly lotesService: LotesService,
+    private readonly dataSource: DataSource,
+    private readonly equivalenciaService: EquivalenciaService,
   ) {}
 
   async aplicarTransformacion(
-  id_receta: number,
-  cantidad_producida: number,
-): Promise<void> {
-  const detallesReceta = await this.detRecetaRepository.find({
-    where: { recet_rec: { id_rec: id_receta } },
-    relations: ['prod_rec'],
-  });
+    id_receta: number,
+    cantidad_producida: number,
+  ): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-  if (detallesReceta.length === 0) {
-    throw new BadRequestException('La receta no tiene ingredientes definidos.');
-  }
+    try {
+      const detallesReceta = await this.detRecetaRepository.find({
+        where: { recet_rec: { id_rec: id_receta } },
+        relations: ['prod_rec'],
+      });
 
-  // 👉 Paso 1: Validar stock antes de transformar
-  for (const detalle of detallesReceta) {
-    const idInsumo = detalle.prod_rec.id_prod;
-    const requerido = detalle.cant_rec * cantidad_producida;
-
-    const lotes = await this.detCompraRepository.find({
-      where: {
-        prod_dcom: { id_prod: idInsumo },
-        est_lote_dcom: In(['vigente', 'por_vencer']),
-        cant_disponible_dcom: MoreThan(0),
-      },
-    });
-
-    const totalDisponible = lotes.reduce(
-      (acc, lote) => acc + Number(lote.cant_disponible_dcom),
-      0,
-    );
-
-    if (totalDisponible < requerido) {
-      throw new BadRequestException(
-        `Stock insuficiente para el insumo ${detalle.prod_rec.nom_prod}. Requerido: ${requerido}, disponible: ${totalDisponible}`,
-      );
-    }
-  }
-
-  // 👉 Paso 2: Consumir ingredientes
-  for (const detalle of detallesReceta) {
-    const idInsumo = detalle.prod_rec.id_prod;
-    const cantidadTotalNecesaria = detalle.cant_rec * cantidad_producida;
-
-    const lotes = await this.detCompraRepository.find({
-      where: {
-        prod_dcom: { id_prod: idInsumo },
-        est_lote_dcom: In(['vigente', 'por_vencer']),
-        cant_disponible_dcom: MoreThan(0),
-      },
-      order: { fech_ven_prod_dcom: 'ASC', id_dcom: 'ASC' },
-    });
-
-    let restante = cantidadTotalNecesaria;
-
-    for (const lote of lotes) {
-      if (restante <= 0) break;
-
-      const disponible = Number(lote.cant_disponible_dcom);
-      const usar = Math.min(disponible, restante);
-
-      lote.cant_disponible_dcom = disponible - usar;
-      lote.cant_usada_dcom = Number(lote.cant_usada_dcom) + usar;
-
-      if (lote.cant_disponible_dcom === 0) {
-        lote.est_lote_dcom = 'vencido';
+      if (detallesReceta.length === 0) {
+        throw new BadRequestException(
+          'La receta no tiene ingredientes definidos.',
+        );
       }
 
-      await this.detCompraRepository.save(lote);
-      restante -= usar;
-    }
+      for (const detalle of detallesReceta) {
+        const idInsumo = detalle.prod_rec.id_prod;
+        let requerido = detalle.cant_rec * cantidad_producida;
 
-    // 👇 Actualizar stock general del producto insumo
-    const productoInsumo = await this.productoRepository.findOneBy({
-      id_prod: idInsumo,
-    });
+        // ✅ Aplicar equivalencia activa si existe
+        const equivalencia =
+          await this.equivalenciaService.obtenerEquivalenciaActiva(idInsumo);
 
-    if (productoInsumo) {
-      productoInsumo.stock_prod -= cantidadTotalNecesaria;
-      if (productoInsumo.stock_prod < 0) {
-        productoInsumo.stock_prod = 0;
+        if (equivalencia) {
+          // Si la unidad en receta difiere de la unidad base de equivalencia, convertir
+          if (equivalencia.und_prod_equiv !== detalle.und_prod_rec) {
+            console.log(
+              `🔄 Convirtiendo ${requerido} ${detalle.und_prod_rec} a unidad base ${equivalencia.und_prod_equiv} para producto ${idInsumo}`,
+            );
+            requerido = requerido / equivalencia.cant_equiv;
+          }
+          // Si las unidades son iguales, se deja tal como está
+        }
+
+        // ✅ Redondear para asegurar consumo válido
+        requerido = Math.round(requerido);
+
+        const lotes = await this.lotesService.listarLotesPorProducto(idInsumo);
+        const totalDisponible = lotes.reduce(
+          (acc, lote) => acc + Math.floor(Number(lote.cant_disp_lote)),
+          0,
+        );
+
+        if (totalDisponible < requerido) {
+          throw new BadRequestException(
+            `Stock insuficiente para el insumo ${detalle.prod_rec.nom_prod}. Requerido: ${requerido}, disponible: ${totalDisponible}`,
+          );
+        }
+
+        let restante = requerido;
+        for (const lote of lotes) {
+          if (restante <= 0) break;
+
+          const disponible = Math.floor(lote.cant_disp_lote);
+          const usar = Math.min(disponible, restante);
+
+          console.log(
+            `✅ Consumiendo ${usar} del lote ${lote.id_lote} para insumo ${idInsumo}`,
+          );
+
+          await this.lotesService.consumirLote(lote.id_lote, usar);
+          restante -= usar;
+        }
+
+        const productoInsumo = await this.productoRepository.findOneBy({
+          id_prod: idInsumo,
+        });
+        if (productoInsumo) {
+          productoInsumo.stock_prod -= requerido;
+          if (productoInsumo.stock_prod < 0) productoInsumo.stock_prod = 0;
+          await this.productoRepository.save(productoInsumo);
+        }
       }
-      await this.productoRepository.save(productoInsumo);
+
+      const receta = await this.recetaRepository.findOne({
+        where: { id_rec: id_receta },
+        relations: ['prod_rec'],
+      });
+
+      if (!receta || !receta.prod_rec) {
+        throw new NotFoundException(
+          'Receta o producto transformado no encontrado.',
+        );
+      }
+
+      const productoTransformado = await this.productoRepository.findOneBy({
+        id_prod: receta.prod_rec.id_prod,
+      });
+
+      if (!productoTransformado) {
+        throw new NotFoundException('Producto transformado no encontrado.');
+      }
+
+      productoTransformado.stock_prod += cantidad_producida;
+      await this.productoRepository.save(productoTransformado);
+
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      console.error('Error durante la transformación:', error);
+      throw error;
+    } finally {
+      await queryRunner.release();
     }
   }
-
-  // 👉 Paso 3: Aumentar stock del producto transformado
-  const receta = await this.recetaRepository.findOne({
-    where: { id_rec: id_receta },
-    relations: ['prod_rec'],
-  });
-
-  if (!receta || !receta.prod_rec) {
-    throw new NotFoundException('Receta o producto transformado no encontrado.');
-  }
-
-  const productoTransformado = await this.productoRepository.findOneBy({
-    id_prod: receta.prod_rec.id_prod,
-  });
-
-  if (!productoTransformado) {
-    throw new NotFoundException('Producto transformado no encontrado.');
-  }
-
-  productoTransformado.stock_prod += cantidad_producida;
-  await this.productoRepository.save(productoTransformado);
-}
-
 
   async crearTransformacion(
     createDto: CreateTransformacionDto,
@@ -173,6 +178,18 @@ export class TransformacionesService {
 
     const transformacionGuardada =
       await this.transformacionesRepository.save(transformacion);
+
+    // Registrar lote generado por transformación
+    await this.lotesService.crearLote({
+      prod_lote: receta.prod_rec.id_prod,
+      cant_tot_lote: createDto.cant_prod_trans,
+      cant_disp_lote: createDto.cant_prod_trans,
+      cant_usad_lote: 0,
+      esta_lote: 'vigente',
+      fecha_venc_lote: null,
+      orig_lote: 'transformacion',
+      id_origen: transformacionGuardada.id_trans,
+    });
 
     return {
       message: 'Transformación registrada correctamente',

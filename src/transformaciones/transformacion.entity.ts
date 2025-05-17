@@ -17,7 +17,7 @@ export class Transformacion {
   @JoinColumn({ name: 'rece_trans' })
   rece_trans: Receta;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  @Column({ type: 'int' })
   cant_prod_trans: number;
 
   @Column({

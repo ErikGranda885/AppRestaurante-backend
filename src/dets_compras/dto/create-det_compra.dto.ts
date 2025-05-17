@@ -1,18 +1,4 @@
-import { Type } from 'class-transformer';
-import {
-  IsDate,
-  IsEnum,
-  IsNotEmpty,
-  IsNumber,
-  IsOptional,
-  IsString,
-} from 'class-validator';
-
-export enum EstadoLote {
-  VIGENTE = 'vigente',
-  POR_VENCER = 'por_vencer',
-  VENCIDO = 'vencido',
-}
+import { IsNotEmpty, IsNumber } from 'class-validator';
 
 export class CreateDetCompraDto {
   @IsNotEmpty()
@@ -22,11 +8,6 @@ export class CreateDetCompraDto {
   @IsNotEmpty()
   @IsNumber()
   prod_dcom: number;
-
-  @IsOptional()
-  @Type(() => Date)
-  @IsDate()
-  fech_ven_prod_dcom?: Date;
 
   @IsNotEmpty()
   @IsNumber()
@@ -39,20 +20,4 @@ export class CreateDetCompraDto {
   @IsNotEmpty()
   @IsNumber()
   sub_tot_dcom: number;
-
-  @IsOptional()
-  @IsString()
-  lote_dcom?: string;
-
-  @IsOptional()
-  @IsNumber()
-  cant_usada_dcom?: number;
-
-  @IsOptional()
-  @IsNumber()
-  cant_disponible_dcom?: number;
-
-  @IsOptional()
-  @IsEnum(EstadoLote)
-  est_lote_dcom?: EstadoLote;
 }

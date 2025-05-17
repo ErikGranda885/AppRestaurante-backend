@@ -5,54 +5,77 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { differenceInDays, format } from 'date-fns';
-import { Det_Compra } from 'src/dets_compras/det_compra.entity';
 import { Producto } from 'src/productos/producto.entity';
 import { In, MoreThan, Repository, DataSource, IsNull, Not } from 'typeorm';
+import { Lote } from 'src/lotes/lote.entity';
+
 @Injectable()
 export class InventarioService {
   constructor(
-    @InjectRepository(Det_Compra)
-    private readonly detCompraRepository: Repository<Det_Compra>,
+    @InjectRepository(Lote)
+    private readonly loteRepository: Repository<Lote>,
     @InjectRepository(Producto)
     private readonly productoRepository: Repository<Producto>,
     private dataSource: DataSource,
   ) {}
+
   async consumirProductoPorLote(
     prodId: number,
     cantidad: number,
-  ): Promise<Det_Compra[]> {
+  ): Promise<
+    {
+      id_lote: number;
+      cantidadConsumida: number;
+      cant_usad_lote: number;
+      cant_disp_lote: number;
+      esta_lote: string;
+    }[]
+  > {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      const lotes = await queryRunner.manager.find(Det_Compra, {
+      const lotes = await queryRunner.manager.find(Lote, {
         where: {
-          prod_dcom: { id_prod: prodId },
-          est_lote_dcom: In(['vigente', 'por_vencer']),
-          cant_disponible_dcom: MoreThan(0),
+          prod_lote: { id_prod: prodId },
+          esta_lote: In(['vigente', 'por_vencer']),
+          cant_disp_lote: MoreThan(0),
         },
-        order: { fech_ven_prod_dcom: 'ASC', id_dcom: 'ASC' },
+        order: { fecha_venc_lote: 'ASC', id_lote: 'ASC' },
       });
 
       let restante = cantidad;
-      const lotesUsados: Det_Compra[] = [];
+      const lotesUsados: {
+        id_lote: number;
+        cantidadConsumida: number;
+        cant_usad_lote: number;
+        cant_disp_lote: number;
+        esta_lote: string;
+      }[] = [];
 
       for (const lote of lotes) {
-        if (restante === 0) break;
+        if (restante <= 0) break;
 
-        const disponible = Number(lote.cant_disponible_dcom);
+        const disponible = Number(lote.cant_disp_lote);
         const usar = Math.min(disponible, restante);
 
-        lote.cant_usada_dcom = Number(lote.cant_usada_dcom) + usar;
-        lote.cant_disponible_dcom = disponible - usar;
+        lote.cant_usad_lote += usar;
+        lote.cant_disp_lote -= usar;
+
+        if (lote.cant_disp_lote <= 0) {
+          lote.esta_lote = 'vencido';
+        }
 
         await queryRunner.manager.save(lote);
 
-        // Clonamos el lote para registrar la cantidad utilizada en este consumo
-        const loteUsado = { ...lote };
-        loteUsado.cant_disponible_dcom = usar;
-        lotesUsados.push(loteUsado);
+        lotesUsados.push({
+          id_lote: lote.id_lote,
+          cantidadConsumida: usar,
+          cant_usad_lote: lote.cant_usad_lote,
+          cant_disp_lote: lote.cant_disp_lote,
+          esta_lote: lote.esta_lote,
+        });
 
         restante -= usar;
       }
@@ -84,15 +107,15 @@ export class InventarioService {
       );
     }
 
-    const lotes = await this.detCompraRepository.find({
+    const lotes = await this.loteRepository.find({
       where: {
-        prod_dcom: { id_prod: idProducto },
-        est_lote_dcom: In(['vigente', 'por_vencer']),
+        prod_lote: { id_prod: idProducto },
+        esta_lote: In(['vigente', 'por_vencer']),
       },
     });
 
     const stockTotal = lotes.reduce(
-      (acc, lote) => acc + Number(lote.cant_disponible_dcom),
+      (acc, lote) => acc + Number(lote.cant_disp_lote),
       0,
     );
 
@@ -113,26 +136,26 @@ export class InventarioService {
     const productosConVencimiento: any[] = [];
 
     for (const producto of productos) {
-      const lotes = await this.detCompraRepository.find({
+      const lotes = await this.loteRepository.find({
         where: {
-          prod_dcom: { id_prod: producto.id_prod },
-          est_lote_dcom: In(['vigente', 'por_vencer']),
-          cant_disponible_dcom: MoreThan(0),
+          prod_lote: { id_prod: producto.id_prod },
+          esta_lote: In(['vigente', 'por_vencer']),
+          cant_disp_lote: MoreThan(0),
         },
         order: {
-          fech_ven_prod_dcom: 'ASC',
-          id_dcom: 'ASC',
+          fecha_venc_lote: 'ASC',
+          id_lote: 'ASC',
         },
       });
 
       const stockTotal = lotes.reduce(
-        (acc, lote) => acc + Number(lote.cant_disponible_dcom),
+        (acc, lote) => acc + Number(lote.cant_disp_lote),
         0,
       );
 
       let fechaFormateada: string | null = null;
-      if (lotes.length > 0 && lotes[0].fech_ven_prod_dcom) {
-        const fecha = new Date(lotes[0].fech_ven_prod_dcom + 'T00:00:00');
+      if (lotes.length > 0 && lotes[0].fecha_venc_lote) {
+        const fecha = new Date(lotes[0].fecha_venc_lote);
         fechaFormateada = format(fecha, 'dd/MM/yyyy');
       }
 
@@ -171,21 +194,19 @@ export class InventarioService {
     }[] = [];
 
     for (const producto of productos) {
-      const lote = await this.detCompraRepository.findOne({
+      const lote = await this.loteRepository.findOne({
         where: {
-          prod_dcom: { id_prod: producto.id_prod },
-          est_lote_dcom: In(['vigente', 'por_vencer']),
-          cant_disponible_dcom: MoreThan(0),
-          fech_ven_prod_dcom: Not(IsNull()), // ✅ cambio aquí
+          prod_lote: { id_prod: producto.id_prod },
+          esta_lote: In(['vigente', 'por_vencer']),
+          cant_disp_lote: MoreThan(0),
+          fecha_venc_lote: Not(IsNull()),
         },
-        order: { fech_ven_prod_dcom: 'ASC' },
+        order: { fecha_venc_lote: 'ASC' },
       });
 
-      if (lote && lote.fech_ven_prod_dcom) {
+      if (lote && lote.fecha_venc_lote) {
         const hoy = new Date();
-        const fechaVencimiento = new Date(
-          lote.fech_ven_prod_dcom + 'T00:00:00',
-        );
+        const fechaVencimiento = new Date(lote.fecha_venc_lote);
         const diasRestantes = differenceInDays(fechaVencimiento, hoy);
 
         if (diasRestantes >= 0) {

@@ -32,6 +32,9 @@ import { RecetasModule } from './recetas/recetas.module';
 import { DetsRecetasModule } from './dets_recetas/dets_recetas.module';
 import { EquivalenciasModule } from './equivalencias/equivalencias.module';
 import { TransformacionesModule } from './transformaciones/transformaciones.module';
+import { LotesService } from './lotes/lotes.service';
+import { LotesController } from './lotes/lotes.controller';
+import { LotesModule } from './lotes/lotes.module';
 
 @Module({
   imports: [
@@ -45,6 +48,7 @@ import { TransformacionesModule } from './transformaciones/transformaciones.modu
       database: process.env.DB_DATABASE,
       entities: ['dist/**/*.entity{.ts,.js}'],
       synchronize: true,
+      
     }),
     UsuariosModule,
     CategoriasModule,
@@ -67,6 +71,7 @@ import { TransformacionesModule } from './transformaciones/transformaciones.modu
     DetsRecetasModule,
     EquivalenciasModule,
     TransformacionesModule,
+    LotesModule,
   ],
   controllers: [
     AppController,

@@ -9,6 +9,7 @@ import { Det_Compra } from './det_compra.entity';
 import { CreateDetCompraDto } from './dto/create-det_compra.dto';
 import { Producto } from 'src/productos/producto.entity';
 import { EquivalenciaService } from 'src/equivalencias/equivalencias.service';
+import { LotesService } from 'src/lotes/lotes.service';
 
 @Injectable()
 export class DetCompraService {
@@ -18,34 +19,29 @@ export class DetCompraService {
 
     @InjectRepository(Producto)
     private readonly productoRepository: Repository<Producto>,
+
     private readonly equivalenciaService: EquivalenciaService,
+    private readonly lotesService: LotesService,
   ) {}
 
-  // Obtener un detalle de compra por ID
   async obtenerDetallesCompra(id: number): Promise<Det_Compra[]> {
     const detalles = await this.detCompraRepository.find({
       where: { comp_dcom: { id_comp: id } },
     });
-    if (!detalles || detalles.length === 0) {
+
+    if (!detalles.length) {
       throw new NotFoundException(
         `No se encontraron detalles para la compra con id ${id}`,
       );
     }
+
     return detalles;
   }
 
-  // Crear un nuevo detalle de compra y actualizar el producto
   async crearDetalleCompra(
     createDetCompraDto: CreateDetCompraDto,
   ): Promise<Det_Compra> {
     try {
-      const fechaVencimiento = createDetCompraDto.fech_ven_prod_dcom
-        ? new Date(createDetCompraDto.fech_ven_prod_dcom)
-            .toISOString()
-            .split('T')[0]
-        : null;
-
-      // 👉 1. Obtener el producto
       const producto = await this.productoRepository.findOne({
         where: { id_prod: createDetCompraDto.prod_dcom },
       });
@@ -56,7 +52,7 @@ export class DetCompraService {
 
       let stockFinal = createDetCompraDto.cant_dcom;
 
-      // 👉 2. Si es insumo, verificar equivalencia y recalcular stock
+      // Ajuste por equivalencia si es insumo
       if (producto.tip_prod === 'Insumo') {
         try {
           const equivalencia =
@@ -65,31 +61,22 @@ export class DetCompraService {
             );
           stockFinal = createDetCompraDto.cant_dcom * equivalencia.cant_equiv;
         } catch (error) {
-          if (error instanceof NotFoundException) {
-            stockFinal = createDetCompraDto.cant_dcom;
-          } else {
-            throw error;
-          }
+          if (!(error instanceof NotFoundException)) throw error;
         }
       }
 
-      // 👉 3. Crear el detalle de compra
+      // Guardar detalle de compra
       const nuevoDetalle = this.detCompraRepository.create({
         comp_dcom: { id_comp: createDetCompraDto.comp_dcom } as any,
         prod_dcom: { id_prod: createDetCompraDto.prod_dcom } as any,
         cant_dcom: createDetCompraDto.cant_dcom,
         prec_uni_dcom: createDetCompraDto.prec_uni_dcom,
         sub_tot_dcom: createDetCompraDto.sub_tot_dcom,
-        fech_ven_prod_dcom: fechaVencimiento,
-        lote_dcom: createDetCompraDto.lote_dcom,
-        cant_usada_dcom: 0,
-        cant_disponible_dcom: stockFinal,
-        est_lote_dcom: createDetCompraDto.est_lote_dcom ?? 'vigente',
       });
 
       const detalleGuardado = await this.detCompraRepository.save(nuevoDetalle);
 
-      // 👉 4. Actualizar el producto según tipo
+      // Actualizar producto
       producto.stock_prod += stockFinal;
       producto.prec_comp_prod = createDetCompraDto.prec_uni_dcom;
 
@@ -106,6 +93,18 @@ export class DetCompraService {
 
       await this.productoRepository.save(producto);
 
+      // Crear lote asociado
+      await this.lotesService.crearLoteDesdeCompra({
+        prod_lote: producto.id_prod,
+        cant_tot_lote: stockFinal,
+        cant_disp_lote: stockFinal,
+        cant_usad_lote: 0,
+        fecha_vencimiento: undefined,
+        estado: 'vigente',
+        origen: 'compra',
+        id_origen: detalleGuardado.id_dcom,
+      });
+
       return detalleGuardado;
     } catch (error) {
       console.error('Error al crear detalle de compra:', error);
@@ -115,7 +114,6 @@ export class DetCompraService {
     }
   }
 
-  // Eliminar un detalle de compra
   async eliminarDetalleCompra(id: number): Promise<void> {
     const result = await this.detCompraRepository.delete(id);
     if (result.affected === 0) {
@@ -125,7 +123,6 @@ export class DetCompraService {
     }
   }
 
-  // Obtener todos los detalles de todas las compras
   async obtenerTodosLosDetalles(): Promise<Det_Compra[]> {
     return await this.detCompraRepository.find({
       relations: ['comp_dcom', 'prod_dcom'],
