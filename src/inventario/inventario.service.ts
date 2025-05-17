@@ -149,56 +149,58 @@ export class InventarioService {
   }
 
   async obtenerProductosPorCaducar(limit: number = 7): Promise<
-  {
-    id: number;
-    name: string;
-    img: string | null;
-    expiresIn: string;
-  }[]
-> {
-  const productos = await this.productoRepository.find({
-    where: {
-      tip_prod: In(['transformado', 'directo', 'combo']),
-      est_prod: 'Activo',
-    },
-  });
-
-  const productosPorCaducar: {
-    id: number;
-    name: string;
-    img: string | null;
-    expiresIn: string;
-  }[] = [];
-
-  for (const producto of productos) {
-    const lote = await this.detCompraRepository.findOne({
+    {
+      id: number;
+      name: string;
+      img: string | null;
+      expiresIn: string;
+    }[]
+  > {
+    const productos = await this.productoRepository.find({
       where: {
-        prod_dcom: { id_prod: producto.id_prod },
-        est_lote_dcom: In(['vigente', 'por_vencer']),
-        cant_disponible_dcom: MoreThan(0),
-        fech_ven_prod_dcom: Not(IsNull()), // ✅ cambio aquí
+        tip_prod: In(['transformado', 'directo', 'combo']),
+        est_prod: 'Activo',
       },
-      order: { fech_ven_prod_dcom: 'ASC' },
     });
 
-    if (lote && lote.fech_ven_prod_dcom) {
-      const hoy = new Date();
-      const fechaVencimiento = new Date(lote.fech_ven_prod_dcom + 'T00:00:00');
-      const diasRestantes = differenceInDays(fechaVencimiento, hoy);
+    const productosPorCaducar: {
+      id: number;
+      name: string;
+      img: string | null;
+      expiresIn: string;
+    }[] = [];
 
-      if (diasRestantes >= 0) {
-        productosPorCaducar.push({
-          id: producto.id_prod,
-          name: producto.nom_prod,
-          img: producto.img_prod,
-          expiresIn: `${diasRestantes} días`,
-        });
+    for (const producto of productos) {
+      const lote = await this.detCompraRepository.findOne({
+        where: {
+          prod_dcom: { id_prod: producto.id_prod },
+          est_lote_dcom: In(['vigente', 'por_vencer']),
+          cant_disponible_dcom: MoreThan(0),
+          fech_ven_prod_dcom: Not(IsNull()), // ✅ cambio aquí
+        },
+        order: { fech_ven_prod_dcom: 'ASC' },
+      });
+
+      if (lote && lote.fech_ven_prod_dcom) {
+        const hoy = new Date();
+        const fechaVencimiento = new Date(
+          lote.fech_ven_prod_dcom + 'T00:00:00',
+        );
+        const diasRestantes = differenceInDays(fechaVencimiento, hoy);
+
+        if (diasRestantes >= 0) {
+          productosPorCaducar.push({
+            id: producto.id_prod,
+            name: producto.nom_prod,
+            img: producto.img_prod,
+            expiresIn: `${diasRestantes} días`,
+          });
+        }
       }
     }
-  }
 
-  return productosPorCaducar
-    .sort((a, b) => parseInt(a.expiresIn) - parseInt(b.expiresIn))
-    .slice(0, limit);
-}
+    return productosPorCaducar
+      .sort((a, b) => parseInt(a.expiresIn) - parseInt(b.expiresIn))
+      .slice(0, limit);
+  }
 }

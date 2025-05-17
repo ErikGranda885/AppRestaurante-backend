@@ -36,4 +36,8 @@ export class CreateProductoDto {
   @IsOptional()
   @IsString()
   est_prod?: string;
+
+  @IsOptional()
+  @IsNumber()
+  iva_prod?: number;
 }

@@ -66,10 +66,9 @@ export class DetCompraService {
           stockFinal = createDetCompraDto.cant_dcom * equivalencia.cant_equiv;
         } catch (error) {
           if (error instanceof NotFoundException) {
-            // Si no existe equivalencia, usa la cantidad normal
             stockFinal = createDetCompraDto.cant_dcom;
           } else {
-            throw error; // Otro error (DB, etc.)
+            throw error;
           }
         }
       }
@@ -83,17 +82,27 @@ export class DetCompraService {
         sub_tot_dcom: createDetCompraDto.sub_tot_dcom,
         fech_ven_prod_dcom: fechaVencimiento,
         lote_dcom: createDetCompraDto.lote_dcom,
-        cant_usada_dcom: 0, // 👈 inicial siempre 0
-        cant_disponible_dcom: stockFinal, // 👈 stock real (convertido o no)
+        cant_usada_dcom: 0,
+        cant_disponible_dcom: stockFinal,
         est_lote_dcom: createDetCompraDto.est_lote_dcom ?? 'vigente',
       });
 
       const detalleGuardado = await this.detCompraRepository.save(nuevoDetalle);
 
-      // 👉 4. Actualizar el stock y precios del producto
-      producto.stock_prod += stockFinal; // 👈 suma stock real
+      // 👉 4. Actualizar el producto según tipo
+      producto.stock_prod += stockFinal;
       producto.prec_comp_prod = createDetCompraDto.prec_uni_dcom;
-      producto.prec_vent_prod = createDetCompraDto.prec_uni_dcom * 1.2;
+
+      if (
+        producto.tip_prod === 'Directo' ||
+        producto.tip_prod === 'Transformado'
+      ) {
+        producto.prec_vent_prod = createDetCompraDto.prec_uni_dcom * 1.2;
+        producto.iva_prod = 12;
+      } else {
+        producto.prec_vent_prod = null;
+        producto.iva_prod = null;
+      }
 
       await this.productoRepository.save(producto);
 

@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, MoreThan, Repository } from 'typeorm';
 import { Transformacion } from './transformacion.entity';
 import { CreateTransformacionDto } from './dto/create-transformacion.dto';
 import { UpdateTransformacionDto } from './dto/update-transformacion.dto';
@@ -32,80 +32,112 @@ export class TransformacionesService {
   ) {}
 
   async aplicarTransformacion(
-    id_receta: number,
-    cantidad_producida: number,
-  ): Promise<void> {
-    const detallesReceta = await this.detRecetaRepository.find({
-      where: { recet_rec: { id_rec: id_receta } },
-      relations: ['prod_rec'],
-    });
+  id_receta: number,
+  cantidad_producida: number,
+): Promise<void> {
+  const detallesReceta = await this.detRecetaRepository.find({
+    where: { recet_rec: { id_rec: id_receta } },
+    relations: ['prod_rec'],
+  });
 
-    if (detallesReceta.length === 0) {
-      throw new BadRequestException(
-        'La receta no tiene ingredientes definidos.',
-      );
-    }
-
-    for (const detalle of detallesReceta) {
-      const idInsumo = detalle.prod_rec.id_prod;
-      const cantidadTotalNecesaria = detalle.cant_rec * cantidad_producida;
-
-      const lotes = await this.detCompraRepository.find({
-        where: {
-          prod_dcom: { id_prod: idInsumo },
-          est_lote_dcom: 'vigente',
-        },
-        order: { fech_ven_prod_dcom: 'ASC' },
-      });
-
-      let cantidadPorDescontar = cantidadTotalNecesaria;
-
-      for (const lote of lotes) {
-        if (lote.cant_disponible_dcom >= cantidadPorDescontar) {
-          lote.cant_disponible_dcom -= cantidadPorDescontar;
-          if (lote.cant_disponible_dcom === 0) {
-            lote.est_lote_dcom = 'vencido';
-          }
-          await this.detCompraRepository.save(lote);
-          cantidadPorDescontar = 0;
-          break;
-        } else {
-          cantidadPorDescontar -= lote.cant_disponible_dcom;
-          lote.cant_disponible_dcom = 0;
-          lote.est_lote_dcom = 'vencido';
-          await this.detCompraRepository.save(lote);
-        }
-      }
-
-      if (cantidadPorDescontar > 0) {
-        throw new BadRequestException(
-          `Stock insuficiente para el insumo ${detalle.prod_rec.nom_prod}`,
-        );
-      }
-    }
-
-    const receta = await this.recetaRepository.findOne({
-      where: { id_rec: id_receta },
-      relations: ['prod_rec'],
-    });
-
-    if (!receta || !receta.prod_rec) {
-      throw new NotFoundException(
-        'Receta o producto transformado no encontrado.',
-      );
-    }
-
-    const productoTransformado = await this.productoRepository.findOne({
-      where: { id_prod: receta.prod_rec.id_prod },
-    });
-
-    if (!productoTransformado) {
-      throw new NotFoundException('Producto transformado no encontrado.');
-    }
-
-    productoTransformado.stock_prod += cantidad_producida;
-    await this.productoRepository.save(productoTransformado);
+  if (detallesReceta.length === 0) {
+    throw new BadRequestException('La receta no tiene ingredientes definidos.');
   }
+
+  // 👉 Paso 1: Validar stock antes de transformar
+  for (const detalle of detallesReceta) {
+    const idInsumo = detalle.prod_rec.id_prod;
+    const requerido = detalle.cant_rec * cantidad_producida;
+
+    const lotes = await this.detCompraRepository.find({
+      where: {
+        prod_dcom: { id_prod: idInsumo },
+        est_lote_dcom: In(['vigente', 'por_vencer']),
+        cant_disponible_dcom: MoreThan(0),
+      },
+    });
+
+    const totalDisponible = lotes.reduce(
+      (acc, lote) => acc + Number(lote.cant_disponible_dcom),
+      0,
+    );
+
+    if (totalDisponible < requerido) {
+      throw new BadRequestException(
+        `Stock insuficiente para el insumo ${detalle.prod_rec.nom_prod}. Requerido: ${requerido}, disponible: ${totalDisponible}`,
+      );
+    }
+  }
+
+  // 👉 Paso 2: Consumir ingredientes
+  for (const detalle of detallesReceta) {
+    const idInsumo = detalle.prod_rec.id_prod;
+    const cantidadTotalNecesaria = detalle.cant_rec * cantidad_producida;
+
+    const lotes = await this.detCompraRepository.find({
+      where: {
+        prod_dcom: { id_prod: idInsumo },
+        est_lote_dcom: In(['vigente', 'por_vencer']),
+        cant_disponible_dcom: MoreThan(0),
+      },
+      order: { fech_ven_prod_dcom: 'ASC', id_dcom: 'ASC' },
+    });
+
+    let restante = cantidadTotalNecesaria;
+
+    for (const lote of lotes) {
+      if (restante <= 0) break;
+
+      const disponible = Number(lote.cant_disponible_dcom);
+      const usar = Math.min(disponible, restante);
+
+      lote.cant_disponible_dcom = disponible - usar;
+      lote.cant_usada_dcom = Number(lote.cant_usada_dcom) + usar;
+
+      if (lote.cant_disponible_dcom === 0) {
+        lote.est_lote_dcom = 'vencido';
+      }
+
+      await this.detCompraRepository.save(lote);
+      restante -= usar;
+    }
+
+    // 👇 Actualizar stock general del producto insumo
+    const productoInsumo = await this.productoRepository.findOneBy({
+      id_prod: idInsumo,
+    });
+
+    if (productoInsumo) {
+      productoInsumo.stock_prod -= cantidadTotalNecesaria;
+      if (productoInsumo.stock_prod < 0) {
+        productoInsumo.stock_prod = 0;
+      }
+      await this.productoRepository.save(productoInsumo);
+    }
+  }
+
+  // 👉 Paso 3: Aumentar stock del producto transformado
+  const receta = await this.recetaRepository.findOne({
+    where: { id_rec: id_receta },
+    relations: ['prod_rec'],
+  });
+
+  if (!receta || !receta.prod_rec) {
+    throw new NotFoundException('Receta o producto transformado no encontrado.');
+  }
+
+  const productoTransformado = await this.productoRepository.findOneBy({
+    id_prod: receta.prod_rec.id_prod,
+  });
+
+  if (!productoTransformado) {
+    throw new NotFoundException('Producto transformado no encontrado.');
+  }
+
+  productoTransformado.stock_prod += cantidad_producida;
+  await this.productoRepository.save(productoTransformado);
+}
+
 
   async crearTransformacion(
     createDto: CreateTransformacionDto,

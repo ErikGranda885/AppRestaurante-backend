@@ -34,7 +34,7 @@ export class Producto {
   und_prod: string;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
-  prec_vent_prod: number;
+  prec_vent_prod: number | null;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   prec_comp_prod: number;
@@ -71,4 +71,7 @@ export class Producto {
 
   @OneToMany(() => Det_Venta, (detalle) => detalle.prod_dventa)
   det_ventas: Det_Venta[];
+
+  @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
+  iva_prod: number | null;
 }
