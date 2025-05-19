@@ -11,7 +11,7 @@ import { CreateProductoDto } from './dto/create-producto.dto';
 import { Categoria } from 'src/categorias/categoria.entity';
 import { UpdateProductoDto } from './dto/update-producto.dto';
 import { Workbook } from 'exceljs';
-
+import * as PdfPrinter from 'pdfmake';
 @Injectable()
 export class ProductosService {
   constructor(
@@ -814,6 +814,247 @@ export class ProductosService {
     return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 
+  async exportarReporteProductosInsumoPDF(
+    desde?: string,
+    hasta?: string,
+  ): Promise<Buffer> {
+    const desdeDate = desde ? new Date(`${desde}T00:00:00`) : new Date();
+    const hastaDate = hasta ? new Date(`${hasta}T23:59:59`) : new Date();
+
+    const productos = await this.productosRepository.find();
+    const equivalencias = await this.dataSource
+      .getRepository('equivalencias')
+      .createQueryBuilder('equiv')
+      .leftJoinAndSelect('equiv.prod_equiv', 'producto')
+      .getMany();
+
+    const lotes = await this.dataSource
+      .getRepository('lotes')
+      .createQueryBuilder('l')
+      .leftJoinAndSelect('l.prod_lote', 'producto')
+      .where('DATE(l.crea_en_lote) <= :hasta', {
+        hasta: hastaDate.toISOString().split('T')[0],
+      })
+      .getMany();
+
+    const transformaciones = await this.dataSource
+      .getRepository('transformaciones')
+      .createQueryBuilder('trans')
+      .leftJoinAndSelect('trans.rece_trans', 'receta')
+      .leftJoinAndSelect('receta.ingredientes', 'det_rec')
+      .leftJoinAndSelect('det_rec.prod_rec', 'producto')
+      .where('DATE(trans.fecha_trans) BETWEEN :desde AND :hasta', {
+        desde: desdeDate.toISOString().split('T')[0],
+        hasta: hastaDate.toISOString().split('T')[0],
+      })
+      .getMany();
+
+    const fechas: Date[] = [];
+    for (
+      let d = new Date(desdeDate);
+      d <= hastaDate;
+      d.setDate(d.getDate() + 1)
+    ) {
+      fechas.push(new Date(d));
+    }
+
+    function esMismaFecha(d1: Date, d2: Date): boolean {
+      return (
+        d1.getFullYear() === d2.getFullYear() &&
+        d1.getMonth() === d2.getMonth() &&
+        d1.getDate() === d2.getDate()
+      );
+    }
+
+    function fechaLocal(date: Date): Date {
+      return new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    }
+
+    const insumos = productos.filter((p) => p.tip_prod === 'Insumo');
+    const insumosConEquivalencia = insumos.filter((p) =>
+      equivalencias.find((e) => e.prod_equiv.id_prod === p.id_prod),
+    );
+
+    if (insumosConEquivalencia.length === 0) {
+      throw new NotFoundException(
+        'No se encontraron insumos con equivalencias registradas.',
+      );
+    }
+
+    const body: any[][] = [
+      [
+        { text: 'ID', bold: true },
+        { text: 'Nombre', bold: true },
+        { text: 'Unidad Base', bold: true },
+        { text: 'Equivalencia', bold: true },
+        ...fechas.flatMap((f) => [
+          { text: `Stock ${f.toLocaleDateString('es-EC')}`, bold: true },
+          { text: `Interpr.`, bold: true },
+        ]),
+      ],
+    ];
+
+    for (const producto of insumosConEquivalencia) {
+      const equiv = equivalencias.find(
+        (e) => e.prod_equiv.id_prod === producto.id_prod,
+      );
+      if (!equiv) continue;
+
+      const unidadBase = producto.und_prod;
+      const unidadEquiv = equiv.und_prod_equiv;
+      const cantEquiv = equiv.cant_equiv;
+
+      const fila = [
+        producto.id_prod,
+        producto.nom_prod,
+        unidadBase,
+        `1 ${unidadBase} = ${cantEquiv} ${unidadEquiv}`,
+      ];
+
+      for (const fecha of fechas) {
+        const comprasAntes = lotes
+          .filter(
+            (l) =>
+              l.prod_lote?.id_prod === producto.id_prod &&
+              l.orig_lote === 'compra' &&
+              fechaLocal(new Date(l.crea_en_lote)) < fecha,
+          )
+          .reduce((sum, l) => sum + Number(l.cant_tot_lote), 0);
+
+        const consumoAntes = transformaciones
+          .flatMap((t) =>
+            t.rece_trans.ingredientes
+              .filter(
+                (i) =>
+                  i.prod_rec.id_prod === producto.id_prod &&
+                  fechaLocal(new Date(t.fecha_trans)) < fecha,
+              )
+              .map((i) => i.cant_rec * t.cant_prod_trans),
+          )
+          .reduce((sum, cant) => sum + cant, 0);
+
+        const stockInicial = comprasAntes - consumoAntes;
+
+        const comprasDia = lotes
+          .filter(
+            (l) =>
+              l.prod_lote?.id_prod === producto.id_prod &&
+              l.orig_lote === 'compra' &&
+              esMismaFecha(fechaLocal(new Date(l.crea_en_lote)), fecha),
+          )
+          .reduce((sum, l) => sum + Number(l.cant_tot_lote), 0);
+
+        const consumoDia = transformaciones
+          .flatMap((t) =>
+            t.rece_trans.ingredientes
+              .filter(
+                (i) =>
+                  i.prod_rec.id_prod === producto.id_prod &&
+                  esMismaFecha(fechaLocal(new Date(t.fecha_trans)), fecha),
+              )
+              .map((i) => i.cant_rec * t.cant_prod_trans),
+          )
+          .reduce((sum, cant) => sum + cant, 0);
+
+        const stockFinal = stockInicial + comprasDia - consumoDia;
+
+        let interpretacion = 'Sin stock';
+        if (stockFinal > 0) {
+          const cantidad = stockFinal / cantEquiv;
+          const enteros = Math.floor(cantidad);
+          const decimales = Number((cantidad - enteros).toFixed(2));
+          const unidadFracc = unidadBase === 'und' ? unidadEquiv : unidadBase;
+
+          if (unidadBase === 'und') {
+            if (enteros > 0 && decimales > 0) {
+              interpretacion = `${enteros} ${unidadBase} + ${Math.round(
+                decimales * cantEquiv,
+              )} ${unidadFracc}`;
+            } else if (enteros > 0) {
+              interpretacion = `${enteros} ${unidadBase}`;
+            } else {
+              interpretacion = `${Math.round(decimales * cantEquiv)} ${unidadFracc}`;
+            }
+          } else {
+            if (enteros > 0 && decimales > 0) {
+              interpretacion = `${enteros} ${unidadBase} + ${decimales} ${unidadFracc}`;
+            } else if (enteros > 0) {
+              interpretacion = `${enteros} ${unidadBase}`;
+            } else {
+              interpretacion = `${decimales} ${unidadFracc}`;
+            }
+          }
+        }
+
+        fila.push(stockFinal, interpretacion);
+      }
+
+      body.push(fila);
+    }
+
+    const fonts = {
+      Roboto: {
+        normal: 'Helvetica',
+        bold: 'Helvetica-Bold',
+        italics: 'Helvetica-Oblique',
+        bolditalics: 'Helvetica-BoldOblique',
+      },
+    };
+
+    const printer = new PdfPrinter(fonts);
+    const docDefinition = {
+      pageOrientation: 'landscape',
+      content: [
+        { text: 'REPORTE DE PRODUCTOS INSUMO', style: 'header' },
+        {
+          columns: [
+            {
+              text: `Desde: ${desdeDate.toLocaleDateString('es-EC')}`,
+              style: 'subheader',
+            },
+            {
+              text: `Hasta: ${hastaDate.toLocaleDateString('es-EC')}`,
+              style: 'subheader',
+              alignment: 'right',
+            },
+          ],
+        },
+        '\n',
+        {
+          table: {
+            headerRows: 1,
+            widths: Array(body[0].length).fill('*'),
+            body,
+          },
+          layout: 'lightHorizontalLines',
+        },
+      ],
+      styles: {
+        header: {
+          fontSize: 18,
+          bold: true,
+          alignment: 'center',
+          margin: [0, 0, 0, 10],
+        },
+        subheader: {
+          fontSize: 10,
+          italics: true,
+        },
+      },
+      defaultStyle: {
+        font: 'Roboto',
+      },
+    };
+
+    return new Promise((resolve, reject) => {
+      const pdfDoc = printer.createPdfKitDocument(docDefinition);
+      const chunks: Uint8Array[] = [];
+      pdfDoc.on('data', (chunk) => chunks.push(chunk));
+      pdfDoc.on('end', () => resolve(Buffer.concat(chunks)));
+      pdfDoc.end();
+    });
+  }
+
   async exportarReporteProductosDirectosTransformadosExcel(
     desde?: string,
     hasta?: string,
@@ -1009,5 +1250,200 @@ export class ProductosService {
     });
 
     return Buffer.from(await workbook.xlsx.writeBuffer());
+  }
+
+  async exportarReporteProductosDirectosTransformadosPDF(
+    desde?: string,
+    hasta?: string,
+  ): Promise<Buffer> {
+    const desdeDate = desde ? new Date(`${desde}T00:00:00`) : new Date();
+    const hastaDate = hasta ? new Date(`${hasta}T23:59:59`) : new Date();
+
+    const productos = await this.productosRepository.find();
+    const productosFiltrados = productos.filter((p) =>
+      ['Directo', 'Transformado'].includes(p.tip_prod),
+    );
+
+    const lotes = await this.dataSource
+      .getRepository('lotes')
+      .createQueryBuilder('l')
+      .leftJoinAndSelect('l.prod_lote', 'producto')
+      .where('DATE(l.crea_en_lote) <= :hasta', {
+        hasta: hastaDate.toISOString().split('T')[0],
+      })
+      .getMany();
+
+    const ventas = await this.dataSource
+      .getRepository('dets_ventas')
+      .createQueryBuilder('dv')
+      .leftJoinAndSelect('dv.vent_dventa', 'venta')
+      .leftJoinAndSelect('dv.prod_dventa', 'producto')
+      .where('DATE(venta.fech_vent) BETWEEN :desde AND :hasta', {
+        desde: desdeDate.toISOString().split('T')[0],
+        hasta: hastaDate.toISOString().split('T')[0],
+      })
+      .getMany();
+
+    const fechas: Date[] = [];
+    for (
+      let d = new Date(desdeDate);
+      d <= hastaDate;
+      d.setDate(d.getDate() + 1)
+    ) {
+      fechas.push(new Date(d));
+    }
+
+    function esMismaFecha(d1: Date, d2: Date): boolean {
+      return (
+        d1.getFullYear() === d2.getFullYear() &&
+        d1.getMonth() === d2.getMonth() &&
+        d1.getDate() === d2.getDate()
+      );
+    }
+
+    function esAntesDe(d1: Date, d2: Date): boolean {
+      return (
+        d1.getFullYear() < d2.getFullYear() ||
+        (d1.getFullYear() === d2.getFullYear() &&
+          d1.getMonth() < d2.getMonth()) ||
+        (d1.getFullYear() === d2.getFullYear() &&
+          d1.getMonth() === d2.getMonth() &&
+          d1.getDate() < d2.getDate())
+      );
+    }
+
+    const body: any[][] = [
+      [
+        { text: 'ID', bold: true },
+        { text: 'Nombre', bold: true },
+        { text: 'Tipo', bold: true },
+        { text: 'Unidad', bold: true },
+        ...fechas.map((f) => ({
+          text: f.toLocaleDateString('es-EC'),
+          bold: true,
+        })),
+      ],
+    ];
+
+    for (const producto of productosFiltrados) {
+      let stockAcumulado = 0;
+
+      const acumuladoInicial = lotes
+        .filter(
+          (l) =>
+            l.prod_lote?.id_prod === producto.id_prod &&
+            esAntesDe(new Date(l.crea_en_lote), fechas[0]) &&
+            l.orig_lote ===
+              (producto.tip_prod === 'Directo' ? 'compra' : 'transformacion'),
+        )
+        .reduce((sum, l) => sum + Number(l.cant_tot_lote), 0);
+
+      const ventasIniciales = ventas
+        .filter(
+          (v) =>
+            v.prod_dventa?.id_prod === producto.id_prod &&
+            esAntesDe(new Date(v.vent_dventa.fech_vent), fechas[0]),
+        )
+        .reduce((sum, v) => sum + Number(v.cant_dventa), 0);
+
+      stockAcumulado = acumuladoInicial - ventasIniciales;
+
+      const fila = [
+        producto.id_prod,
+        producto.nom_prod,
+        producto.tip_prod,
+        producto.und_prod,
+      ];
+
+      for (const fecha of fechas) {
+        const entradas = lotes
+          .filter(
+            (l) =>
+              l.prod_lote?.id_prod === producto.id_prod &&
+              esMismaFecha(new Date(l.crea_en_lote), fecha) &&
+              l.orig_lote ===
+                (producto.tip_prod === 'Directo' ? 'compra' : 'transformacion'),
+          )
+          .reduce((sum, l) => sum + Number(l.cant_tot_lote), 0);
+
+        const salidas = ventas
+          .filter(
+            (v) =>
+              v.prod_dventa?.id_prod === producto.id_prod &&
+              esMismaFecha(new Date(v.vent_dventa.fech_vent), fecha),
+          )
+          .reduce((sum, v) => sum + Number(v.cant_dventa), 0);
+
+        stockAcumulado += entradas - salidas;
+        fila.push(stockAcumulado);
+      }
+
+      body.push(fila);
+    }
+
+    const fonts = {
+      Roboto: {
+        normal: 'Helvetica',
+        bold: 'Helvetica-Bold',
+        italics: 'Helvetica-Oblique',
+        bolditalics: 'Helvetica-BoldOblique',
+      },
+    };
+
+    const printer = new PdfPrinter(fonts);
+    const docDefinition = {
+      pageOrientation: 'landscape',
+      content: [
+        {
+          text: 'REPORTE DE PRODUCTOS DIRECTOS Y TRANSFORMADOS',
+          style: 'header',
+        },
+        {
+          columns: [
+            {
+              text: `Desde: ${desdeDate.toLocaleDateString('es-EC')}`,
+              style: 'subheader',
+            },
+            {
+              text: `Hasta: ${hastaDate.toLocaleDateString('es-EC')}`,
+              style: 'subheader',
+              alignment: 'right',
+            },
+          ],
+        },
+        '\n',
+        {
+          table: {
+            headerRows: 1,
+            widths: Array(body[0].length).fill('*'),
+            body,
+          },
+          layout: 'lightHorizontalLines',
+        },
+      ],
+      styles: {
+        header: {
+          fontSize: 18,
+          bold: true,
+          alignment: 'center',
+          margin: [0, 0, 0, 10],
+        },
+        subheader: {
+          fontSize: 10,
+          italics: true,
+        },
+      },
+      defaultStyle: {
+        font: 'Roboto',
+      },
+    };
+
+    return new Promise((resolve, reject) => {
+      const pdfDoc = printer.createPdfKitDocument(docDefinition);
+      const chunks: Uint8Array[] = [];
+      pdfDoc.on('data', (chunk) => chunks.push(chunk));
+      pdfDoc.on('end', () => resolve(Buffer.concat(chunks)));
+      pdfDoc.end();
+    });
   }
 }

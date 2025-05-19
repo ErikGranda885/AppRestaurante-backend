@@ -142,6 +142,47 @@ export class ProductosController {
     }
   }
 
+  @Get('reporte-insumos/pdf')
+  async exportarReporteInsumosPDF(
+    @Query('desde') desde: string,
+    @Query('hasta') hasta: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const buffer =
+        await this.productosService.exportarReporteProductosInsumoPDF(
+          desde,
+          hasta,
+        );
+
+      const nombreArchivo = `reporte_insumos_${desde || 'inicio'}_${
+        hasta || 'hoy'
+      }.pdf`;
+
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${nombreArchivo}"`,
+      });
+
+      res.send(buffer);
+    } catch (error) {
+      console.error('Error al exportar reporte PDF de insumos:', error);
+
+      if (error.status === 404) {
+        res.status(404).json({
+          statusCode: 404,
+          message: error.message,
+        });
+      } else {
+        res.status(500).json({
+          statusCode: 500,
+          message: 'Error interno al generar el PDF de insumos',
+          error: error.message,
+        });
+      }
+    }
+  }
+
   @Get('reporte-directos-transformados')
   async exportarReporteDirectosTransformados(
     @Res() res: Response,
@@ -181,6 +222,47 @@ export class ProductosController {
           statusCode: 500,
           message:
             'Error interno al generar el reporte de directos y transformados',
+          error: error.message,
+        });
+      }
+    }
+  }
+
+  @Get('reporte-directos-transformados/pdf')
+  async exportarReporteDirectosTransformadosPDF(
+    @Query('desde') desde: string,
+    @Query('hasta') hasta: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const buffer =
+        await this.productosService.exportarReporteProductosDirectosTransformadosPDF(
+          desde,
+          hasta,
+        );
+
+      const fechaInicio = desde || 'inicio';
+      const fechaFin = hasta || 'hoy';
+      const nombreArchivo = `reporte_directos_transformados_${fechaInicio}_${fechaFin}.pdf`;
+
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${nombreArchivo}"`,
+      });
+      res.send(buffer);
+    } catch (error) {
+      console.error('Error al exportar PDF de directos/transformados:', error);
+
+      if (error.status === 404) {
+        res.status(404).json({
+          statusCode: 404,
+          message: error.message,
+        });
+      } else {
+        res.status(500).json({
+          statusCode: 500,
+          message:
+            'Error interno al generar el PDF de directos y transformados',
           error: error.message,
         });
       }
