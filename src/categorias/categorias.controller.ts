@@ -64,10 +64,51 @@ export class CategoriasController {
   listar() {
     return this.categoriasService.listarCategorias();
   }
+
   @Get('verificar')
   async verificarNombre(@Query('nombre') nombre: string) {
     const exists = await this.categoriasService.categoriaRegistrada(nombre);
     return { exists };
+  }
+
+  @Get('exportar-excel')
+  async exportarExcel(@Res() res: Response) {
+    try {
+      const buffer = await this.categoriasService.exportarCategoriasExcel();
+
+      res.set({
+        'Content-Type':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename="reporte-categorias.xlsx"',
+      });
+      res.send(buffer);
+    } catch (error) {
+      console.error('Error al exportar categorías (Excel):', error);
+      res.status(error.status || 500).json({
+        statusCode: error.status || 500,
+        message: error.message || 'Error interno al generar el reporte',
+      });
+    }
+  }
+
+  // Este es el nuevo método para el PDF
+  @Get('exportar-pdf')
+  async exportarPDF(@Res() res: Response) {
+    try {
+      const buffer = await this.categoriasService.exportarCategoriasPDF();
+
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': 'attachment; filename="reporte-categorias.pdf"',
+      });
+      res.send(buffer);
+    } catch (error) {
+      console.error('Error al exportar categorías (PDF):', error);
+      res.status(error.status || 500).json({
+        statusCode: error.status || 500,
+        message: error.message || 'Error interno al generar el reporte PDF',
+      });
+    }
   }
 
   @Get(':id')
@@ -97,6 +138,7 @@ export class CategoriasController {
       UpdateCategoriaDto,
     );
   }
+
   @Post('masivo')
   async crearBulk(@Body() createCategoryDto: CreateCategoriaDto[]) {
     return this.categoriasService.crearCategoriasMasivo(createCategoryDto);
