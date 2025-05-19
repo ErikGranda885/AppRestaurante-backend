@@ -814,28 +814,54 @@ export class ProductosService {
     return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 
-  async exportarReporteProductosDirectosTransformadosExcel(): Promise<Buffer> {
+  async exportarReporteProductosDirectosTransformadosExcel(
+    desde?: string,
+    hasta?: string,
+  ): Promise<Buffer> {
     const ExcelJS = require('exceljs');
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Directos y Transformados');
 
     const azul = '305496';
     const blanco = 'FFFFFF';
+    let fila = 1;
 
-    // Título
-    worksheet.addRow(['REPORTE DE PRODUCTOS DIRECTOS Y TRANSFORMADOS']);
-    worksheet.mergeCells('A1:E1');
-    worksheet.getCell('A1').font = {
-      size: 18,
-      bold: true,
-      color: { argb: azul },
-    };
-    worksheet.getCell('A1').alignment = { horizontal: 'center' };
-    worksheet.addRow([]);
+    worksheet.mergeCells(`A${fila}:H${fila}`);
+    const titulo = worksheet.getCell(`A${fila}`);
+    titulo.value = `REPORTE DE PRODUCTOS DIRECTOS Y TRANSFORMADOS`;
+    titulo.font = { size: 18, bold: true, color: { argb: azul } };
+    titulo.alignment = { horizontal: 'center', vertical: 'middle' };
+    fila += 2;
 
-    // Encabezado
-    worksheet.addRow(['ID', 'Nombre', 'Tipo', 'Unidad base', 'Stock']);
-    const encabezado = worksheet.getRow(3);
+    const desdeDate = desde ? new Date(`${desde}T00:00:00`) : new Date();
+    const hastaDate = hasta ? new Date(`${hasta}T23:59:59`) : new Date();
+
+    worksheet.getCell(`A${fila}`).value =
+      `Desde: ${desdeDate.toLocaleDateString('es-EC')}`;
+    worksheet.getCell(`B${fila}`).value =
+      `Hasta: ${hastaDate.toLocaleDateString('es-EC')}`;
+    worksheet.getCell(`A${fila}`).font = { italic: true };
+    worksheet.getCell(`B${fila}`).font = { italic: true };
+    fila += 2;
+
+    const fechas: Date[] = [];
+    for (
+      let d = new Date(desdeDate);
+      d <= hastaDate;
+      d.setDate(d.getDate() + 1)
+    ) {
+      fechas.push(new Date(d));
+    }
+
+    const headers = [
+      'ID',
+      'Nombre',
+      'Tipo',
+      'Unidad base',
+      ...fechas.map((f) => `Stock ${f.toLocaleDateString('es-EC')}`),
+    ];
+    worksheet.addRow(headers);
+    const encabezado = worksheet.getRow(fila);
     encabezado.eachCell((cell) => {
       cell.fill = {
         type: 'pattern',
@@ -851,32 +877,114 @@ export class ProductosService {
         right: { style: 'thin' },
       };
     });
+    fila++;
 
-    // Obtener productos
     const productos = await this.productosRepository.find();
-
-    // Filtrar directos y transformados
-    const filtrados = productos.filter(
-      (p) => p.tip_prod === 'Directo' || p.tip_prod === 'Transformado',
+    const productosFiltrados = productos.filter((p) =>
+      ['Directo', 'Transformado'].includes(p.tip_prod),
     );
 
-    // 🚫 Validar si hay resultados
-    if (filtrados.length === 0) {
-      throw new NotFoundException(
-        'No se encontraron productos directos ni transformados registrados.',
+    const lotes = await this.dataSource
+      .getRepository('lotes')
+      .createQueryBuilder('l')
+      .leftJoinAndSelect('l.prod_lote', 'producto')
+      .where('DATE(l.crea_en_lote) <= :hasta', {
+        hasta: hastaDate.toISOString().split('T')[0],
+      })
+      .getMany();
+
+    const ventas = await this.dataSource
+      .getRepository('dets_ventas')
+      .createQueryBuilder('dv')
+      .leftJoinAndSelect('dv.vent_dventa', 'venta')
+      .leftJoinAndSelect('dv.prod_dventa', 'producto')
+      .where('DATE(venta.fech_vent) BETWEEN :desde AND :hasta', {
+        desde: desdeDate.toISOString().split('T')[0],
+        hasta: hastaDate.toISOString().split('T')[0],
+      })
+      .getMany();
+
+    function esMismaFecha(d1: Date, d2: Date): boolean {
+      return (
+        d1.getFullYear() === d2.getFullYear() &&
+        d1.getMonth() === d2.getMonth() &&
+        d1.getDate() === d2.getDate()
       );
     }
 
-    // Agregar filas
-    for (const producto of filtrados) {
-      const row = worksheet.addRow([
+    function esAntesDe(d1: Date, d2: Date): boolean {
+      return (
+        d1.getFullYear() < d2.getFullYear() ||
+        (d1.getFullYear() === d2.getFullYear() &&
+          d1.getMonth() < d2.getMonth()) ||
+        (d1.getFullYear() === d2.getFullYear() &&
+          d1.getMonth() === d2.getMonth() &&
+          d1.getDate() < d2.getDate())
+      );
+    }
+
+    for (const producto of productosFiltrados) {
+      let stockAcumulado = 0;
+
+      const acumuladoInicial = lotes
+        .filter(
+          (l) =>
+            l.prod_lote?.id_prod === producto.id_prod &&
+            esAntesDe(new Date(l.crea_en_lote), fechas[0]) &&
+            l.orig_lote ===
+              (producto.tip_prod === 'Directo' ? 'compra' : 'transformacion'),
+        )
+        .reduce((sum, l) => sum + Number(l.cant_tot_lote), 0);
+
+      const ventasIniciales = ventas
+        .filter(
+          (v) =>
+            v.prod_dventa?.id_prod === producto.id_prod &&
+            esAntesDe(new Date(v.vent_dventa.fech_vent), fechas[0]),
+        )
+        .reduce((sum, v) => sum + Number(v.cant_dventa), 0);
+
+      stockAcumulado = acumuladoInicial - ventasIniciales;
+
+      console.log(`\n🟡 Producto: ${producto.nom_prod}`);
+      console.log(`Stock acumulado inicial: ${stockAcumulado}`);
+
+      const filaValores = [
         producto.id_prod,
         producto.nom_prod,
         producto.tip_prod,
         producto.und_prod,
-        producto.stock_prod,
-      ]);
+      ];
 
+      for (const fecha of fechas) {
+        const entradas = lotes
+          .filter(
+            (l) =>
+              l.prod_lote?.id_prod === producto.id_prod &&
+              esMismaFecha(new Date(l.crea_en_lote), fecha) &&
+              l.orig_lote ===
+                (producto.tip_prod === 'Directo' ? 'compra' : 'transformacion'),
+          )
+          .reduce((sum, l) => sum + Number(l.cant_tot_lote), 0);
+
+        const salidas = ventas
+          .filter(
+            (v) =>
+              v.prod_dventa?.id_prod === producto.id_prod &&
+              esMismaFecha(new Date(v.vent_dventa.fech_vent), fecha),
+          )
+          .reduce((sum, v) => sum + Number(v.cant_dventa), 0);
+
+        stockAcumulado += entradas - salidas;
+
+        console.log(
+          `📅 ${fecha.toLocaleDateString('es-EC')} → entradas: ${entradas}, salidas: ${salidas}, stock final: ${stockAcumulado}`,
+        );
+
+        filaValores.push(stockAcumulado);
+      }
+
+      const row = worksheet.addRow(filaValores);
       row.eachCell((cell) => {
         cell.alignment = { horizontal: 'center' };
         cell.border = {
@@ -886,9 +994,10 @@ export class ProductosService {
           right: { style: 'thin' },
         };
       });
+
+      fila++;
     }
 
-    // Ajustar columnas automáticamente
     worksheet.columns.forEach((column) => {
       let maxLength = 10;
       column.eachCell({ includeEmpty: true }, (cell) => {

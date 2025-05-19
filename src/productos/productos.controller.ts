@@ -143,15 +143,26 @@ export class ProductosController {
   }
 
   @Get('reporte-directos-transformados')
-  async exportarReporteDirectosTransformados(@Res() res: Response) {
+  async exportarReporteDirectosTransformados(
+    @Res() res: Response,
+    @Query('desde') desde?: string,
+    @Query('hasta') hasta?: string,
+  ) {
     try {
       const buffer =
-        await this.productosService.exportarReporteProductosDirectosTransformadosExcel();
+        await this.productosService.exportarReporteProductosDirectosTransformadosExcel(
+          desde,
+          hasta,
+        );
+
+      const fechaInicio = desde || 'inicio';
+      const fechaFin = hasta || 'hoy';
+      const nombreArchivo = `reporte_directos_transformados_${fechaInicio}_${fechaFin}.xlsx`;
+
       res.set({
         'Content-Type':
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition':
-          'attachment; filename="reporte-directos-transformados.xlsx"',
+        'Content-Disposition': `attachment; filename="${nombreArchivo}"`,
       });
       res.send(buffer);
     } catch (error) {
