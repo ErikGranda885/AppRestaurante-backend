@@ -1,4 +1,5 @@
-import { IsNotEmpty, IsNumber } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsDate, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class CreateDetCompraDto {
   @IsNotEmpty()
@@ -20,4 +21,9 @@ export class CreateDetCompraDto {
   @IsNotEmpty()
   @IsNumber()
   sub_tot_dcom: number;
+
+  @IsOptional()
+  @Type(() => Date) // ✅ transforma string a Date antes de validar
+  @IsDate()
+  fech_ven_prod_dcom?: Date;
 }

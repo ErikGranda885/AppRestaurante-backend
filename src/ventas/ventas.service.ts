@@ -12,7 +12,11 @@ import { UpdateVentaDto } from './dto/update-venta.dto';
 import { Usuario } from 'src/usuarios/usuario.entity';
 import { Det_Venta } from 'src/dets_ventas/det_venta.entity';
 import { CierreDiaService } from 'src/cierre_dia/cierre_dia.service';
-
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { Buffer } from 'buffer';
+import * as PdfPrinter from 'pdfmake';
+import * as path from 'path';
 @Injectable()
 export class VentasService {
   constructor(
@@ -274,43 +278,94 @@ export class VentasService {
     return resultados;
   }
 
-  /* Obtener ventas por periodo (mensual, semanal, diario) */
-  async obtenerVentasPorPeriodo(): Promise<{
-    mensual: { periodo: string; ventas: number }[];
-    semanal: { periodo: string; ventas: number }[];
-    diario: { periodo: string; ventas: number }[];
-  }> {
-    const ventas = await this.ventaRepository.find();
+  async listarVentasConDetallesPorPeriodo(
+    desde?: string,
+    hasta?: string,
+  ): Promise<any[]> {
+    const where: any = {};
+    if (desde && hasta) {
+      where.fech_vent = Between(new Date(desde), new Date(hasta));
+    }
 
-    const mensual: Record<string, number> = {};
-    const semanal: Record<string, number> = {};
-    const diario: Record<string, number> = {};
+    const ventas = await this.ventaRepository.find({
+      where,
+      relations: ['usu_vent'],
+      order: { fech_vent: 'ASC' },
+    });
+
+    const resultados = await Promise.all(
+      ventas.map(async (venta) => {
+        const detalles = await this.detVentaRepository.find({
+          where: { vent_dventa: { id_vent: venta.id_vent } },
+          relations: ['prod_dventa'],
+        });
+
+        const productos = detalles.map((det) => ({
+          nombre: det.prod_dventa.nom_prod,
+          cantidad: det.cant_dventa,
+          precio: det.pre_uni_dventa,
+          subtotal: det.sub_tot_dventa,
+        }));
+
+        return {
+          id_venta: venta.id_vent,
+          cliente: venta.usu_vent,
+          tipoOrden: venta.tip_pag_vent,
+          estado: venta.est_vent,
+          tipoPago: venta.tip_pag_vent,
+          comprobante: venta.comprobante_num_vent,
+          comprobanteImg: venta.comprobante_img_vent,
+          fecha: venta.fech_vent,
+          efectivoRecibido: venta.efe_recibido_vent,
+          efectivoCambio: venta.efe_cambio_vent,
+          total: venta.tot_vent,
+          productos,
+        };
+      }),
+    );
+
+    return resultados;
+  }
+
+  /* Obtener ventas por periodo (mensual, semanal, diario) */
+  async obtenerVentasPorPeriodo(
+    tipo: 'diario' | 'semanal' | 'mensual',
+    desde?: string,
+    hasta?: string,
+  ): Promise<{ periodo: string; total: number }[]> {
+    const where: any = {};
+
+    if (desde && hasta) {
+      where.fech_vent = Between(new Date(desde), new Date(hasta));
+    }
+
+    const ventas = await this.ventaRepository.find({
+      where,
+      order: { fech_vent: 'ASC' },
+    });
+
+    const agrupacion: Record<string, number> = {};
 
     for (const venta of ventas) {
       const fecha = new Date(venta.fech_vent);
-      const mes = fecha.toLocaleString('es-EC', { month: 'long' });
-      const dia = fecha.toLocaleString('es-EC', { weekday: 'short' });
-      const semana = `Semana ${Math.ceil(fecha.getDate() / 7)}`;
+      let clave = '';
 
-      mensual[mes] = (mensual[mes] || 0) + Number(venta.tot_vent);
-      semanal[semana] = (semanal[semana] || 0) + Number(venta.tot_vent);
-      diario[dia] = (diario[dia] || 0) + Number(venta.tot_vent);
+      if (tipo === 'mensual') {
+        clave = format(fecha, 'MMMM yyyy', { locale: es });
+      } else if (tipo === 'semanal') {
+        const semana = Math.ceil(fecha.getDate() / 7);
+        clave = `Semana ${semana} - ${format(fecha, 'MMMM yyyy', { locale: es })}`;
+      } else {
+        clave = format(fecha, 'dd/MM/yyyy');
+      }
+
+      agrupacion[clave] = (agrupacion[clave] || 0) + Number(venta.tot_vent);
     }
 
-    return {
-      mensual: Object.entries(mensual).map(([periodo, ventas]) => ({
-        periodo,
-        ventas,
-      })),
-      semanal: Object.entries(semanal).map(([periodo, ventas]) => ({
-        periodo,
-        ventas,
-      })),
-      diario: Object.entries(diario).map(([periodo, ventas]) => ({
-        periodo,
-        ventas,
-      })),
-    };
+    return Object.entries(agrupacion).map(([periodo, total]) => ({
+      periodo,
+      total: Number(total.toFixed(2)),
+    }));
   }
 
   // Obtener las últimas N ventas
@@ -350,5 +405,275 @@ export class VentasService {
       comprobante: venta.comprobante_num_vent,
       imagen: venta.comprobante_img_vent,
     }));
+  }
+
+  async exportarExcelPorPeriodo(
+    tipo: 'diario' | 'semanal' | 'mensual',
+    desde?: string,
+    hasta?: string,
+  ): Promise<Buffer> {
+    const ExcelJS = require('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet(`Ventas ${tipo}`);
+
+    const azul = '305496';
+    const blanco = 'FFFFFF';
+    const grisClaro = 'F2F2F2';
+    const grisMedio = 'D9D9D9';
+
+    let fila = 1;
+
+    // Título
+    worksheet.mergeCells(`A${fila}:G${fila}`);
+    const titulo = worksheet.getCell(`A${fila}`);
+    titulo.value = `REPORTE DE VENTAS (${tipo.toUpperCase()})`;
+    titulo.font = { size: 18, bold: true, color: { argb: azul } };
+    titulo.alignment = { horizontal: 'center', vertical: 'middle' };
+    fila += 2;
+
+    // Fechas
+    const desdeFmt = desde ? new Date(desde).toLocaleDateString('es-EC') : '-';
+    const hastaFmt = hasta ? new Date(hasta).toLocaleDateString('es-EC') : '-';
+
+    worksheet.getCell(`A${fila}`).value = `Desde: ${desdeFmt}`;
+    worksheet.getCell(`B${fila}`).value = `Hasta: ${hastaFmt}`;
+    worksheet.getCell(`A${fila}`).font = { italic: true };
+    worksheet.getCell(`B${fila}`).font = { italic: true };
+    fila += 2;
+
+    // Encabezado
+    worksheet.addRow([
+      'ID Venta',
+      'Fecha',
+      'Método de Pago',
+      'Estado',
+      'Recibido ($)',
+      'Cambio ($)',
+      'Total ($)',
+    ]);
+    const encabezado = worksheet.getRow(fila);
+    encabezado.eachCell((cell) => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: azul },
+      };
+      cell.font = { bold: true, color: { argb: blanco } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = {
+        top: { style: 'thin' },
+        bottom: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
+      };
+    });
+    fila++;
+
+    // Obtener ventas filtradas
+    const ventas = await this.listarVentasConDetallesPorPeriodo(desde, hasta);
+    if (!ventas.length) {
+      throw new NotFoundException('No se encontraron ventas en el periodo.');
+    }
+
+    for (const venta of ventas) {
+      // Fila de venta
+      const row = worksheet.addRow([
+        venta.id_venta,
+        new Date(venta.fecha).toLocaleDateString('es-EC'),
+        venta.tipoPago,
+        venta.estado,
+        venta.efectivoRecibido,
+        venta.efectivoCambio,
+        venta.total,
+      ]);
+      row.eachCell((cell, col) => {
+        if ([5, 6, 7].includes(col)) {
+          cell.numFmt = '"$"#,##0.00';
+        }
+        cell.border = {
+          top: { style: 'thin' },
+          bottom: { style: 'thin' },
+          left: { style: 'thin' },
+          right: { style: 'thin' },
+        };
+        cell.alignment = { horizontal: 'center' };
+      });
+      fila++;
+
+      // Detalle de productos
+      worksheet.mergeCells(`B${fila}:G${fila}`);
+      worksheet.getCell(`B${fila}`).value = 'DETALLE DE PRODUCTOS';
+      worksheet.getCell(`B${fila}`).font = { bold: true };
+      worksheet.getCell(`B${fila}`).alignment = { horizontal: 'left' };
+      fila++;
+
+      worksheet.getRow(fila).values = [
+        '',
+        'Producto',
+        'Cantidad',
+        'Precio ($)',
+        'Subtotal ($)',
+      ];
+      worksheet.getRow(fila).eachCell((cell) => {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: grisMedio },
+        };
+        cell.font = { bold: true };
+        cell.alignment = { horizontal: 'center' };
+        cell.border = {
+          top: { style: 'thin' },
+          bottom: { style: 'thin' },
+          left: { style: 'thin' },
+          right: { style: 'thin' },
+        };
+      });
+      fila++;
+
+      for (const prod of venta.productos) {
+        const detalleRow = worksheet.addRow([
+          '',
+          prod.nombre,
+          prod.cantidad,
+          prod.precio,
+          prod.subtotal,
+        ]);
+        detalleRow.eachCell((cell, col) => {
+          if ([4, 5].includes(col)) {
+            cell.numFmt = '"$"#,##0.00';
+          }
+          cell.alignment = { horizontal: 'center' };
+          cell.border = {
+            top: { style: 'thin' },
+            bottom: { style: 'thin' },
+            left: { style: 'thin' },
+            right: { style: 'thin' },
+          };
+        });
+        fila++;
+      }
+
+      fila++;
+    }
+
+    // Ajustar ancho
+    worksheet.columns.forEach((col) => {
+      let max = 12;
+      col.eachCell({ includeEmpty: true }, (cell) => {
+        const length = (cell.value?.toString().length ?? 0) + 2;
+        if (length > max) max = length;
+      });
+      col.width = max;
+    });
+
+    return Buffer.from(await workbook.xlsx.writeBuffer());
+  }
+
+  async exportarPDFPorPeriodo(
+    tipo: 'diario' | 'semanal' | 'mensual',
+    desde?: string,
+    hasta?: string,
+  ): Promise<Buffer> {
+    const ventas = await this.listarVentasConDetallesPorPeriodo(desde, hasta);
+    if (!ventas.length) {
+      throw new NotFoundException('No se encontraron ventas en el periodo.');
+    }
+
+    const fonts = {
+      Roboto: {
+        normal: 'Helvetica',
+        bold: 'Helvetica-Bold',
+        italics: 'Helvetica-Oblique',
+        bolditalics: 'Helvetica-BoldOblique',
+      },
+    };
+
+    const printer = new PdfPrinter(fonts);
+    const docDefinition = {
+      content: [
+        { text: `REPORTE DE VENTAS (${tipo.toUpperCase()})`, style: 'header' },
+        {
+          columns: [
+            {
+              text: `Desde: ${desde ? new Date(desde).toLocaleDateString('es-EC') : '-'}`,
+              style: 'subheader',
+            },
+            {
+              text: `Hasta: ${hasta ? new Date(hasta).toLocaleDateString('es-EC') : '-'}`,
+              style: 'subheader',
+              alignment: 'right',
+            },
+          ],
+        },
+        '\n',
+        ...ventas.flatMap((venta) => [
+          {
+            table: {
+              widths: ['*', '*', '*', '*', '*', '*', '*'],
+              body: [
+                [
+                  'ID',
+                  'Fecha',
+                  'Método de Pago',
+                  'Estado',
+                  'Recibido ($)',
+                  'Cambio ($)',
+                  'Total ($)',
+                ],
+                [
+                  venta.id_venta,
+                  new Date(venta.fecha).toLocaleDateString('es-EC'),
+                  venta.tipoPago,
+                  venta.estado,
+                  `$${Number(venta.efectivoRecibido || 0).toFixed(2)}`,
+                  `$${Number(venta.efectivoCambio || 0).toFixed(2)}`,
+                  `$${Number(venta.total || 0).toFixed(2)}`,
+                ],
+              ],
+            },
+            layout: 'lightHorizontalLines',
+          },
+          '\n',
+          { text: 'Detalle de productos', bold: true, margin: [0, 5, 0, 3] },
+          {
+            table: {
+              widths: ['*', '*', '*', '*'],
+              body: [
+                ['Producto', 'Cantidad', 'Precio ($)', 'Subtotal ($)'],
+                ...venta.productos.map((p) => [
+                  p.nombre,
+                  p.cantidad,
+                  `$${Number(p.precio || 0).toFixed(2)}`,
+                  `$${Number(p.subtotal || 0).toFixed(2)}`,
+                ]),
+              ],
+            },
+            layout: 'lightHorizontalLines',
+          },
+          '\n\n',
+        ]),
+      ],
+      styles: {
+        header: {
+          fontSize: 18,
+          bold: true,
+          alignment: 'center',
+          margin: [0, 0, 0, 10],
+        },
+        subheader: { fontSize: 10, italics: true },
+      },
+      defaultStyle: {
+        font: 'Roboto',
+      },
+    };
+
+    return new Promise((resolve, reject) => {
+      const pdfDoc = printer.createPdfKitDocument(docDefinition);
+      const chunks: Uint8Array[] = [];
+      pdfDoc.on('data', (chunk) => chunks.push(chunk));
+      pdfDoc.on('end', () => resolve(Buffer.concat(chunks)));
+      pdfDoc.end();
+    });
   }
 }

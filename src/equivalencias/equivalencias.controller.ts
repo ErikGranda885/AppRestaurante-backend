@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseIntPipe,
   Patch,
   Post,
   Put,
@@ -36,10 +37,10 @@ export class EquivalenciasController {
 
   // Obtener equivalencia activa de un producto
   @Get('producto/:id_prod/activa')
-  async obtenerEquivalenciaActiva(@Param('id_prod') id_prod: number) {
-    return await this.equivalenciaService.obtenerEquivalenciaActiva(
-      Number(id_prod),
-    );
+  async obtenerEquivalenciaActiva(
+    @Param('id_prod', ParseIntPipe) id_prod: number,
+  ) {
+    return await this.equivalenciaService.obtenerEquivalenciaActiva(id_prod);
   }
 
   // Obtener una equivalencia específica

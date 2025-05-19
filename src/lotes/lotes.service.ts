@@ -111,7 +111,7 @@ export class LotesService {
     cant_tot_lote: number;
     cant_disp_lote: number;
     cant_usad_lote: number;
-    fecha_vencimiento?: Date;
+    fecha_vencimiento?: Date | null; // ✅ permitimos null
     estado: 'vigente' | 'por_vencer' | 'vencido';
     origen: 'compra' | 'transformacion';
     id_origen: number;
@@ -121,7 +121,7 @@ export class LotesService {
       cant_tot_lote: data.cant_tot_lote,
       cant_disp_lote: data.cant_disp_lote,
       cant_usad_lote: data.cant_usad_lote,
-      fecha_venc_lote: data.fecha_vencimiento,
+      fecha_venc_lote: data.fecha_vencimiento ?? null, // ✅ aseguramos fallback
       esta_lote: data.estado,
       orig_lote: data.origen,
       id_origen: data.id_origen,

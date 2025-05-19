@@ -8,11 +8,13 @@ import {
   Query,
   Put,
   BadRequestException,
+  Res,
 } from '@nestjs/common';
 import { VentasService } from './ventas.service';
 import { CreateVentaDto } from './dto/create-venta.dto';
 import { UpdateVentaDto } from './dto/update-venta.dto';
 import { UpdateEstadoDto } from './dto/update-estado.dto';
+import { Response } from 'express';
 
 @Controller('ventas')
 export class VentasController {
@@ -41,10 +43,44 @@ export class VentasController {
     return await this.ventasService.obtenerVentasPorCategoria();
   }
 
-  @Get('periodo')
-  async obtenerVentasPorPeriodo() {
-    return await this.ventasService.obtenerVentasPorPeriodo();
+  @Get('reportes/ventas/periodo')
+  async obtenerVentasPorPeriodo(
+    @Query('tipo') tipo: 'diario' | 'semanal' | 'mensual',
+    @Query('desde') desde?: string,
+    @Query('hasta') hasta?: string,
+  ) {
+    if (!tipo) {
+      throw new BadRequestException('El parámetro "tipo" es requerido');
+    }
+    return this.ventasService.obtenerVentasPorPeriodo(tipo, desde, hasta);
   }
+
+  @Get('reportes/ventas/periodo/excel')
+  async exportarVentasExcel(
+    @Res() res: Response,
+    @Query('tipo') tipo: 'diario' | 'semanal' | 'mensual',
+    @Query('desde') desde?: string,
+    @Query('hasta') hasta?: string,
+  ) {
+    if (!tipo) {
+      throw new BadRequestException('El parámetro "tipo" es requerido');
+    }
+
+    const buffer = await this.ventasService.exportarExcelPorPeriodo(
+      tipo,
+      desde,
+      hasta,
+    );
+
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename=reporte_ventas_${tipo}.xlsx`,
+    });
+
+    res.send(buffer);
+  }
+
   // GET /ventas/ultimas?limit=5
   @Get('ultimas')
   async obtenerUltimasVentas(@Query('limit') limit: string) {
@@ -115,5 +151,30 @@ export class VentasController {
       throw new BadRequestException('El ID del usuario no es válido');
     }
     return await this.ventasService.filtrarVentasPorUsuario(parsedId);
+  }
+
+  @Get('reportes/ventas/periodo/pdf')
+  async exportarVentasPDF(
+    @Res() res: Response,
+    @Query('tipo') tipo: 'diario' | 'semanal' | 'mensual',
+    @Query('desde') desde?: string,
+    @Query('hasta') hasta?: string,
+  ) {
+    if (!tipo) {
+      throw new BadRequestException('El parámetro "tipo" es requerido');
+    }
+
+    const buffer = await this.ventasService.exportarPDFPorPeriodo(
+      tipo,
+      desde,
+      hasta,
+    );
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename=reporte_ventas_${tipo}.pdf`,
+    });
+
+    res.send(buffer);
   }
 }

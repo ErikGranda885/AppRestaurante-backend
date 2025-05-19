@@ -24,18 +24,25 @@ export class DetCompraService {
     private readonly lotesService: LotesService,
   ) {}
 
-  async obtenerDetallesCompra(id: number): Promise<Det_Compra[]> {
-    const detalles = await this.detCompraRepository.find({
-      where: { comp_dcom: { id_comp: id } },
-    });
+  async obtenerDetallesCompra(id: number): Promise<any[]> {
+    const detalles = await this.detCompraRepository
+      .createQueryBuilder('dcom')
+      .leftJoinAndSelect('dcom.prod_dcom', 'producto')
+      .leftJoinAndSelect('dcom.comp_dcom', 'compra')
+      .leftJoin(
+        'lotes',
+        'lote',
+        'lote.id_origen = dcom.id_dcom AND lote.orig_lote = :origen',
+        { origen: 'compra' },
+      )
+      .addSelect('lote.fecha_venc_lote', 'fecha_venc_lote')
+      .where('dcom.comp_dcom = :id', { id })
+      .getRawAndEntities();
 
-    if (!detalles.length) {
-      throw new NotFoundException(
-        `No se encontraron detalles para la compra con id ${id}`,
-      );
-    }
-
-    return detalles;
+    return detalles.entities.map((detalle, index) => ({
+      ...detalle,
+      fech_ven_prod_dcom: detalles.raw[index].fecha_venc_lote || null,
+    }));
   }
 
   async crearDetalleCompra(
@@ -99,7 +106,7 @@ export class DetCompraService {
         cant_tot_lote: stockFinal,
         cant_disp_lote: stockFinal,
         cant_usad_lote: 0,
-        fecha_vencimiento: undefined,
+        fecha_vencimiento: createDetCompraDto.fech_ven_prod_dcom ?? undefined,
         estado: 'vigente',
         origen: 'compra',
         id_origen: detalleGuardado.id_dcom,
