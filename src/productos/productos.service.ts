@@ -562,203 +562,60 @@ export class ProductosService {
     return Buffer.from(await workbook.xlsx.writeBuffer());
   } */
 
-  async exportarReporteProductosInsumoExcel(desde?: string, hasta?: string): Promise<Buffer> {
-  const workbook = new Workbook();
-  const worksheet = workbook.addWorksheet('Productos Insumo');
+  async exportarReporteProductosInsumoExcel(
+    desde?: string,
+    hasta?: string,
+  ): Promise<Buffer> {
+    const workbook = new Workbook();
+    const worksheet = workbook.addWorksheet('Productos Insumo');
 
-  const azul = '305496';
-  const blanco = 'FFFFFF';
-  let fila = 1;
+    const azul = '305496';
+    const blanco = 'FFFFFF';
+    let fila = 1;
 
-  worksheet.mergeCells(`A${fila}:H${fila}`);
-  const titulo = worksheet.getCell(`A${fila}`);
-  titulo.value = `REPORTE DE PRODUCTOS INSUMO`;
-  titulo.font = { size: 18, bold: true, color: { argb: azul } };
-  titulo.alignment = { horizontal: 'center', vertical: 'middle' };
-  fila += 2;
+    worksheet.mergeCells(`A${fila}:H${fila}`);
+    const titulo = worksheet.getCell(`A${fila}`);
+    titulo.value = `REPORTE DE PRODUCTOS INSUMO`;
+    titulo.font = { size: 18, bold: true, color: { argb: azul } };
+    titulo.alignment = { horizontal: 'center', vertical: 'middle' };
+    fila += 2;
 
-  const desdeDate = desde ? new Date(`${desde}T00:00:00`) : new Date();
-  const hastaDate = hasta ? new Date(`${hasta}T23:59:59`) : new Date();
+    const desdeDate = desde ? new Date(`${desde}T00:00:00`) : new Date();
+    const hastaDate = hasta ? new Date(`${hasta}T23:59:59`) : new Date();
 
-  worksheet.getCell(`A${fila}`).value = `Desde: ${desdeDate.toLocaleDateString('es-EC')}`;
-  worksheet.getCell(`B${fila}`).value = `Hasta: ${hastaDate.toLocaleDateString('es-EC')}`;
-  worksheet.getCell(`A${fila}`).font = { italic: true };
-  worksheet.getCell(`B${fila}`).font = { italic: true };
-  fila += 2;
+    worksheet.getCell(`A${fila}`).value =
+      `Desde: ${desdeDate.toLocaleDateString('es-EC')}`;
+    worksheet.getCell(`B${fila}`).value =
+      `Hasta: ${hastaDate.toLocaleDateString('es-EC')}`;
+    worksheet.getCell(`A${fila}`).font = { italic: true };
+    worksheet.getCell(`B${fila}`).font = { italic: true };
+    fila += 2;
 
-  const fechas: Date[] = [];
-  for (let d = new Date(desdeDate); d <= hastaDate; d.setDate(d.getDate() + 1)) {
-    fechas.push(new Date(d));
-  }
+    const fechas: Date[] = [];
+    for (
+      let d = new Date(desdeDate);
+      d <= hastaDate;
+      d.setDate(d.getDate() + 1)
+    ) {
+      fechas.push(new Date(d));
+    }
 
-  const headerBase = ['ID', 'Nombre', 'Tipo', 'Unidad base', 'Equivalente'];
-  const headerFechas = fechas.flatMap((f) => {
-    const label = f.toLocaleDateString('es-EC');
-    return [`Stock ${label}`, `Interpretación ${label}`];
-  });
+    const headerBase = ['ID', 'Nombre', 'Tipo', 'Unidad base', 'Equivalente'];
+    const headerFechas = fechas.flatMap((f) => {
+      const label = f.toLocaleDateString('es-EC');
+      return [`Stock ${label}`, `Interpretación ${label}`];
+    });
 
-  worksheet.addRow([...headerBase, ...headerFechas]);
-  const encabezado = worksheet.getRow(fila);
-  encabezado.eachCell((cell) => {
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: azul } };
-    cell.font = { bold: true, color: { argb: blanco } };
-    cell.alignment = { horizontal: 'center', vertical: 'middle' };
-    cell.border = {
-      top: { style: 'thin' },
-      bottom: { style: 'thin' },
-      left: { style: 'thin' },
-      right: { style: 'thin' },
-    };
-  });
-  fila++;
-
-  worksheet.views = [{ state: 'frozen', ySplit: fila }];
-
-  const productos = await this.productosRepository.find();
-  const equivalencias = await this.dataSource
-    .getRepository('equivalencias')
-    .createQueryBuilder('equiv')
-    .leftJoinAndSelect('equiv.prod_equiv', 'producto')
-    .getMany();
-
-  const lotes = await this.dataSource
-    .getRepository('lotes')
-    .createQueryBuilder('l')
-    .leftJoinAndSelect('l.prod_lote', 'producto')
-    .where('DATE(l.crea_en_lote) <= :hasta', {
-      hasta: hastaDate.toISOString().split('T')[0],
-    })
-    .getMany();
-
-  const transformaciones = await this.dataSource
-    .getRepository('transformaciones')
-    .createQueryBuilder('trans')
-    .leftJoinAndSelect('trans.rece_trans', 'receta')
-    .leftJoinAndSelect('receta.ingredientes', 'det_rec')
-    .leftJoinAndSelect('det_rec.prod_rec', 'producto')
-    .where('DATE(trans.fecha_trans) BETWEEN :desde AND :hasta', {
-      desde: desdeDate.toISOString().split('T')[0],
-      hasta: hastaDate.toISOString().split('T')[0],
-    })
-    .getMany();
-
-  function fechaLocal(date: Date): Date {
-    return new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  }
-
-  function esMismaFecha(d1: Date, d2: Date): boolean {
-    return (
-      d1.getFullYear() === d2.getFullYear() &&
-      d1.getMonth() === d2.getMonth() &&
-      d1.getDate() === d2.getDate()
-    );
-  }
-
-  const insumos = productos.filter((p) => p.tip_prod === 'Insumo');
-  const insumosConEquivalencia = insumos.filter((p) =>
-    equivalencias.find((e) => e.prod_equiv.id_prod === p.id_prod),
-  );
-
-  if (insumosConEquivalencia.length === 0) {
-    throw new NotFoundException('No se encontraron insumos con equivalencias registradas.');
-  }
-
-  for (const producto of insumosConEquivalencia) {
-    const equiv = equivalencias.find((e) => e.prod_equiv.id_prod === producto.id_prod);
-    if (!equiv) continue;
-
-    const unidadBase = producto.und_prod;
-    const unidadEquiv = equiv.und_prod_equiv;
-    const cantEquiv = equiv.cant_equiv;
-
-    const baseRow = [
-      producto.id_prod,
-      producto.nom_prod,
-      producto.tip_prod,
-      unidadBase,
-      `1 ${unidadBase} = ${cantEquiv} ${unidadEquiv}`,
-    ];
-
-    const filasFecha = fechas.map((fecha) => {
-      const comprasAntes = lotes
-        .filter(
-          (l) =>
-            l.prod_lote?.id_prod === producto.id_prod &&
-            l.orig_lote === 'compra' &&
-            fechaLocal(new Date(l.crea_en_lote)) < fecha,
-        )
-        .reduce((sum, l) => sum + Number(l.cant_tot_lote), 0);
-
-      const consumoAntes = transformaciones
-        .flatMap((t) =>
-          t.rece_trans.ingredientes
-            .filter(
-              (i) =>
-                i.prod_rec.id_prod === producto.id_prod &&
-                fechaLocal(new Date(t.fecha_trans)) < fecha,
-            )
-            .map((i) => i.cant_rec * t.cant_prod_trans),
-        )
-        .reduce((sum, cant) => sum + cant, 0);
-
-      const stockInicial = comprasAntes - consumoAntes;
-
-      const comprasDia = lotes
-        .filter(
-          (l) =>
-            l.prod_lote?.id_prod === producto.id_prod &&
-            l.orig_lote === 'compra' &&
-            esMismaFecha(fechaLocal(new Date(l.crea_en_lote)), fecha),
-        )
-        .reduce((sum, l) => sum + Number(l.cant_tot_lote), 0);
-
-      const consumoDia = transformaciones
-        .flatMap((t) =>
-          t.rece_trans.ingredientes
-            .filter(
-              (i) =>
-                i.prod_rec.id_prod === producto.id_prod &&
-                esMismaFecha(fechaLocal(new Date(t.fecha_trans)), fecha),
-            )
-            .map((i) => i.cant_rec * t.cant_prod_trans),
-        )
-        .reduce((sum, cant) => sum + cant, 0);
-
-      const stockFinal = stockInicial + comprasDia - consumoDia;
-
-      console.log(`🟡 Producto: ${producto.nom_prod}`);
-      console.log(`📅 Fecha: ${fecha.toLocaleDateString('es-EC')}`);
-      console.log(`  Stock inicial: ${stockInicial}`);
-      console.log(`  Compras del día: ${comprasDia}`);
-      console.log(`  Consumo del día: ${consumoDia}`);
-      console.log(`  Stock final: ${stockFinal}`);
-
-      let interpretacion = '-';
-
-      if (['g', 'ml'].includes(unidadEquiv)) {
-        const porcentaje = (stockFinal / cantEquiv) * 100;
-        interpretacion = `${porcentaje.toFixed(1)}% de 1 ${unidadBase}`;
-      } else {
-        const enteros = Math.floor(stockFinal / cantEquiv);
-        const resto = stockFinal % cantEquiv;
-
-        if (stockFinal <= 0) {
-          interpretacion = `Sin stock`;
-        } else if (enteros > 0 && resto === 0) {
-          interpretacion = `${enteros} ${unidadBase}${enteros !== 1 ? 's' : ''}`;
-        } else if (enteros === 0 && resto > 0) {
-          interpretacion = `${resto} ${unidadEquiv}`;
-        } else {
-          interpretacion = `${enteros} ${unidadBase}${enteros !== 1 ? 's' : ''} + ${resto} ${unidadEquiv}`;
-        }
-      }
-
-      return [stockFinal, interpretacion];
-    }).flat();
-
-    const newRow = worksheet.addRow([...baseRow, ...filasFecha]);
-    newRow.eachCell((cell) => {
-      cell.alignment = { horizontal: 'center' };
+    worksheet.addRow([...headerBase, ...headerFechas]);
+    const encabezado = worksheet.getRow(fila);
+    encabezado.eachCell((cell) => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: azul },
+      };
+      cell.font = { bold: true, color: { argb: blanco } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
       cell.border = {
         top: { style: 'thin' },
         bottom: { style: 'thin' },
@@ -766,25 +623,196 @@ export class ProductosService {
         right: { style: 'thin' },
       };
     });
-
     fila++;
-  }
 
-  worksheet.columns.forEach((column) => {
-    if (column) {
-      let maxLength = 10;
-      column.eachCell?.({ includeEmpty: true }, (cell) => {
-        const value = cell.value;
-        const length = value ? value.toString().length : 0;
-        if (length > maxLength) maxLength = length;
-      });
-      column.width = maxLength + 2;
+    worksheet.views = [{ state: 'frozen', ySplit: fila }];
+
+    const productos = await this.productosRepository.find();
+    const equivalencias = await this.dataSource
+      .getRepository('equivalencias')
+      .createQueryBuilder('equiv')
+      .leftJoinAndSelect('equiv.prod_equiv', 'producto')
+      .getMany();
+
+    const lotes = await this.dataSource
+      .getRepository('lotes')
+      .createQueryBuilder('l')
+      .leftJoinAndSelect('l.prod_lote', 'producto')
+      .where('DATE(l.crea_en_lote) <= :hasta', {
+        hasta: hastaDate.toISOString().split('T')[0],
+      })
+      .getMany();
+
+    const transformaciones = await this.dataSource
+      .getRepository('transformaciones')
+      .createQueryBuilder('trans')
+      .leftJoinAndSelect('trans.rece_trans', 'receta')
+      .leftJoinAndSelect('receta.ingredientes', 'det_rec')
+      .leftJoinAndSelect('det_rec.prod_rec', 'producto')
+      .where('DATE(trans.fecha_trans) BETWEEN :desde AND :hasta', {
+        desde: desdeDate.toISOString().split('T')[0],
+        hasta: hastaDate.toISOString().split('T')[0],
+      })
+      .getMany();
+
+    function fechaLocal(date: Date): Date {
+      return new Date(date.getTime() - date.getTimezoneOffset() * 60000);
     }
-  });
 
-  return Buffer.from(await workbook.xlsx.writeBuffer());
-}
+    function esMismaFecha(d1: Date, d2: Date): boolean {
+      return (
+        d1.getFullYear() === d2.getFullYear() &&
+        d1.getMonth() === d2.getMonth() &&
+        d1.getDate() === d2.getDate()
+      );
+    }
 
+    const insumos = productos.filter((p) => p.tip_prod === 'Insumo');
+    const insumosConEquivalencia = insumos.filter((p) =>
+      equivalencias.find((e) => e.prod_equiv.id_prod === p.id_prod),
+    );
+
+    if (insumosConEquivalencia.length === 0) {
+      throw new NotFoundException(
+        'No se encontraron insumos con equivalencias registradas.',
+      );
+    }
+
+    for (const producto of insumosConEquivalencia) {
+      const equiv = equivalencias.find(
+        (e) => e.prod_equiv.id_prod === producto.id_prod,
+      );
+      if (!equiv) continue;
+
+      const unidadBase = producto.und_prod;
+      const unidadEquiv = equiv.und_prod_equiv;
+      const cantEquiv = equiv.cant_equiv;
+
+      const baseRow = [
+        producto.id_prod,
+        producto.nom_prod,
+        producto.tip_prod,
+        unidadBase,
+        `1 ${unidadBase} = ${cantEquiv} ${unidadEquiv}`,
+      ];
+
+      const filasFecha = fechas
+        .map((fecha) => {
+          const comprasAntes = lotes
+            .filter(
+              (l) =>
+                l.prod_lote?.id_prod === producto.id_prod &&
+                l.orig_lote === 'compra' &&
+                fechaLocal(new Date(l.crea_en_lote)) < fecha,
+            )
+            .reduce((sum, l) => sum + Number(l.cant_tot_lote), 0);
+
+          const consumoAntes = transformaciones
+            .flatMap((t) =>
+              t.rece_trans.ingredientes
+                .filter(
+                  (i) =>
+                    i.prod_rec.id_prod === producto.id_prod &&
+                    fechaLocal(new Date(t.fecha_trans)) < fecha,
+                )
+                .map((i) => i.cant_rec * t.cant_prod_trans),
+            )
+            .reduce((sum, cant) => sum + cant, 0);
+
+          const stockInicial = comprasAntes - consumoAntes;
+
+          const comprasDia = lotes
+            .filter(
+              (l) =>
+                l.prod_lote?.id_prod === producto.id_prod &&
+                l.orig_lote === 'compra' &&
+                esMismaFecha(fechaLocal(new Date(l.crea_en_lote)), fecha),
+            )
+            .reduce((sum, l) => sum + Number(l.cant_tot_lote), 0);
+
+          const consumoDia = transformaciones
+            .flatMap((t) =>
+              t.rece_trans.ingredientes
+                .filter(
+                  (i) =>
+                    i.prod_rec.id_prod === producto.id_prod &&
+                    esMismaFecha(fechaLocal(new Date(t.fecha_trans)), fecha),
+                )
+                .map((i) => i.cant_rec * t.cant_prod_trans),
+            )
+            .reduce((sum, cant) => sum + cant, 0);
+
+          const stockFinal = stockInicial + comprasDia - consumoDia;
+
+          console.log(`🟡 Producto: ${producto.nom_prod}`);
+          console.log(`📅 Fecha: ${fecha.toLocaleDateString('es-EC')}`);
+          console.log(`  Stock inicial: ${stockInicial}`);
+          console.log(`  Compras del día: ${comprasDia}`);
+          console.log(`  Consumo del día: ${consumoDia}`);
+          console.log(`  Stock final: ${stockFinal}`);
+
+          let interpretacion = '-';
+
+          if (stockFinal <= 0) {
+            interpretacion = `Sin stock`;
+          } else {
+            const cantidad = stockFinal / cantEquiv;
+            const enteros = Math.floor(cantidad);
+            const decimales = Number((cantidad - enteros).toFixed(2));
+
+            const unidadFracc = unidadBase === 'und' ? unidadEquiv : unidadBase;
+
+            if (unidadBase === 'und') {
+              if (enteros > 0 && decimales > 0) {
+                interpretacion = `${enteros} ${unidadBase} + ${Math.round(decimales * cantEquiv)} ${unidadFracc}`;
+              } else if (enteros > 0) {
+                interpretacion = `${enteros} ${unidadBase}`;
+              } else {
+                interpretacion = `${Math.round(decimales * cantEquiv)} ${unidadFracc}`;
+              }
+            } else {
+              if (enteros > 0 && decimales > 0) {
+                interpretacion = `${enteros} ${unidadBase} + ${decimales} ${unidadFracc}`;
+              } else if (enteros > 0) {
+                interpretacion = `${enteros} ${unidadBase}`;
+              } else {
+                interpretacion = `${decimales} ${unidadFracc}`;
+              }
+            }
+          }
+
+          return [stockFinal, interpretacion];
+        })
+        .flat();
+
+      const newRow = worksheet.addRow([...baseRow, ...filasFecha]);
+      newRow.eachCell((cell) => {
+        cell.alignment = { horizontal: 'center' };
+        cell.border = {
+          top: { style: 'thin' },
+          bottom: { style: 'thin' },
+          left: { style: 'thin' },
+          right: { style: 'thin' },
+        };
+      });
+
+      fila++;
+    }
+
+    worksheet.columns.forEach((column) => {
+      if (column) {
+        let maxLength = 10;
+        column.eachCell?.({ includeEmpty: true }, (cell) => {
+          const value = cell.value;
+          const length = value ? value.toString().length : 0;
+          if (length > maxLength) maxLength = length;
+        });
+        column.width = maxLength + 2;
+      }
+    });
+
+    return Buffer.from(await workbook.xlsx.writeBuffer());
+  }
 
   async exportarReporteProductosDirectosTransformadosExcel(): Promise<Buffer> {
     const ExcelJS = require('exceljs');
