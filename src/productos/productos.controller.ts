@@ -75,6 +75,107 @@ export class ProductosController {
     return await this.productosService.activarProducto(+id, updateProductoDto);
   }
 
+  /* @Get('reporte-equivalencias')
+  async exportarEquivalencias(
+    @Query('desde') desde: string,
+    @Query('hasta') hasta: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const buffer =
+        await this.productosService.exportarReporteProductosConEquivalenciaExcel(
+          desde,
+          hasta,
+        );
+
+      res.set({
+        'Content-Type':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition':
+          'attachment; filename="reporte-equivalencias.xlsx"',
+      });
+
+      res.send(buffer);
+    } catch (error) {
+      console.error('Error al exportar el reporte de equivalencias:', error);
+      res.status(500).json({
+        statusCode: 500,
+        message: 'Error interno al generar el reporte',
+        error: error.message,
+      });
+    }
+  } */
+
+  @Get('reporte-insumos')
+  async exportarReporteInsumos(
+    @Query('desde') desde: string,
+    @Query('hasta') hasta: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const buffer =
+        await this.productosService.exportarReporteProductosInsumoExcel(
+          desde,
+          hasta,
+        );
+      res.set({
+        'Content-Type':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename="reporte-insumos.xlsx"',
+      });
+      res.send(buffer);
+    } catch (error) {
+      console.error('Error al exportar reporte de insumos:', error);
+
+      if (error.status === 404) {
+        res.status(404).json({
+          statusCode: 404,
+          message: error.message,
+        });
+      } else {
+        res.status(500).json({
+          statusCode: 500,
+          message: 'Error interno al generar el reporte de insumos',
+          error: error.message,
+        });
+      }
+    }
+  }
+
+  @Get('reporte-directos-transformados')
+  async exportarReporteDirectosTransformados(@Res() res: Response) {
+    try {
+      const buffer =
+        await this.productosService.exportarReporteProductosDirectosTransformadosExcel();
+      res.set({
+        'Content-Type':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition':
+          'attachment; filename="reporte-directos-transformados.xlsx"',
+      });
+      res.send(buffer);
+    } catch (error) {
+      console.error(
+        'Error al exportar reporte de directos/transformados:',
+        error,
+      );
+
+      if (error.status === 404) {
+        res.status(404).json({
+          statusCode: 404,
+          message: error.message,
+        });
+      } else {
+        res.status(500).json({
+          statusCode: 500,
+          message:
+            'Error interno al generar el reporte de directos y transformados',
+          error: error.message,
+        });
+      }
+    }
+  }
+
   @Get('plantilla')
   async downloadTemplateProductos(@Res() res: Response) {
     try {

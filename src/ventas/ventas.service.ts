@@ -1,4 +1,3 @@
-// ventas.service.ts
 import {
   BadRequestException,
   Injectable,
