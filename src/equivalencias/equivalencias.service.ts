@@ -4,16 +4,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Equivalencia } from './equivalencia.entity';
 import { CreateEquivalenciaDto } from './dto/create-equivalencia.dto';
 import { UpdateEquivalenciaDto } from './dto/update-equivalencia.dto';
+import { Transformacion } from 'src/transformaciones/transformacion.entity';
 
 @Injectable()
 export class EquivalenciaService {
   constructor(
     @InjectRepository(Equivalencia)
     private equivalenciaRepository: Repository<Equivalencia>,
+    private dataSource: DataSource,
   ) {}
 
   // Crear equivalencia
@@ -96,12 +98,13 @@ export class EquivalenciaService {
     return equivalencia;
   }
 
-  // Actualizar equivalencia
+  // ✅ Actualizar equivalencia sin validación
   async actualizarEquivalencia(
     id: number,
     updateDto: UpdateEquivalenciaDto,
   ): Promise<{ message: string; equivalencia: Equivalencia }> {
     const equivalencia = await this.listarEquivalencia(id);
+
     Object.assign(equivalencia, updateDto);
     const equivalenciaActualizada =
       await this.equivalenciaRepository.save(equivalencia);
@@ -112,9 +115,10 @@ export class EquivalenciaService {
     };
   }
 
-  // Eliminar equivalencia
+  // ✅ Eliminar equivalencia sin validación
   async eliminarEquivalencia(id: number): Promise<{ message: string }> {
     const equivalencia = await this.listarEquivalencia(id);
+
     await this.equivalenciaRepository.remove(equivalencia);
 
     return { message: 'Equivalencia eliminada correctamente' };

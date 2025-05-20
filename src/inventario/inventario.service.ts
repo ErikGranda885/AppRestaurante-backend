@@ -140,6 +140,10 @@ export class InventarioService {
       relations: ['cate_prod'],
     });
 
+    console.log(
+      `✅ Se encontraron ${productos.length} productos para procesar.`,
+    );
+
     const productosConVencimiento: any[] = [];
 
     for (const producto of productos) {
@@ -155,15 +159,37 @@ export class InventarioService {
         },
       });
 
+      console.log(
+        `🧪 Producto: ${producto.nom_prod} - Lotes encontrados: ${lotes.length}`,
+      );
+
       const stockTotal = lotes.reduce(
         (acc, lote) => acc + Number(lote.cant_disp_lote),
         0,
       );
 
+      // Inicializa variables
       let fechaFormateada: string | null = null;
+      let diasRestantes: number | null = null;
+
       if (lotes.length > 0 && lotes[0].fecha_venc_lote) {
-        const fecha = new Date(lotes[0].fecha_venc_lote);
-        fechaFormateada = format(fecha, 'dd/MM/yyyy');
+        const fecha = endOfDay(new Date(lotes[0].fecha_venc_lote));
+        const hoy = startOfDay(new Date());
+
+        if (isValid(fecha)) {
+          diasRestantes = differenceInCalendarDays(fecha, hoy) + 1;
+          fechaFormateada = format(fecha, 'dd/MM/yyyy');
+
+          console.log(
+            `📅 Producto: ${producto.nom_prod} - Fecha venc: ${fechaFormateada} - Días restantes: ${diasRestantes}`,
+          );
+        } else {
+          console.warn(`⚠️ Fecha inválida para producto: ${producto.nom_prod}`);
+        }
+      } else {
+        console.warn(
+          `❌ Producto: ${producto.nom_prod} no tiene lotes válidos.`,
+        );
       }
 
       producto.stock_prod = stockTotal;
@@ -172,9 +198,13 @@ export class InventarioService {
       productosConVencimiento.push({
         ...producto,
         fecha_vence_proxima: fechaFormateada,
+        dias_restantes: diasRestantes,
       });
     }
 
+    console.log(
+      `✅ Total productos procesados con caducidad: ${productosConVencimiento.length}`,
+    );
     return productosConVencimiento;
   }
 
