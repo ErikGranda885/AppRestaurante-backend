@@ -11,11 +11,10 @@ import { UpdateVentaDto } from './dto/update-venta.dto';
 import { Usuario } from 'src/usuarios/usuario.entity';
 import { Det_Venta } from 'src/dets_ventas/det_venta.entity';
 import { CierreDiaService } from 'src/cierre_dia/cierre_dia.service';
-import { format } from 'date-fns';
+import { format, getWeek, getYear } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Buffer } from 'buffer';
 import * as PdfPrinter from 'pdfmake';
-import * as path from 'path';
 @Injectable()
 export class VentasService {
   constructor(
@@ -327,7 +326,7 @@ export class VentasService {
   }
 
   /* Obtener ventas por periodo (mensual, semanal, diario) */
-  async obtenerVentasPorPeriodo(
+  /* async obtenerVentasPorPeriodo(
     tipo: 'diario' | 'semanal' | 'mensual',
     desde?: string,
     hasta?: string,
@@ -365,8 +364,48 @@ export class VentasService {
       periodo,
       total: Number(total.toFixed(2)),
     }));
-  }
+  } */
 
+  async obtenerVentasPorPeriodo(
+    tipo: 'diario' | 'semanal' | 'mensual',
+    desde?: string,
+    hasta?: string,
+  ): Promise<{ periodo: string; total: number }[]> {
+    const where: any = {};
+
+    if (desde && hasta) {
+      where.fech_vent = Between(new Date(desde), new Date(hasta));
+    }
+
+    const ventas = await this.ventaRepository.find({
+      where,
+      order: { fech_vent: 'ASC' },
+    });
+
+    const agrupacion: Record<string, number> = {};
+
+    for (const venta of ventas) {
+      const fecha = new Date(venta.fech_vent);
+      let clave = '';
+
+      if (tipo === 'mensual') {
+        clave = format(fecha, 'MMMM yyyy', { locale: es });
+      } else if (tipo === 'semanal') {
+        const semana = getWeek(fecha, { weekStartsOn: 1, locale: es });
+        const anio = getYear(fecha);
+        clave = `Semana ${semana} - ${anio}`;
+      } else {
+        clave = format(fecha, 'dd/MM/yyyy');
+      }
+
+      agrupacion[clave] = (agrupacion[clave] || 0) + Number(venta.tot_vent);
+    }
+
+    return Object.entries(agrupacion).map(([periodo, total]) => ({
+      periodo,
+      total: Math.round(total * 100) / 100, // evita flotantes
+    }));
+  }
   // Obtener las últimas N ventas
   async obtenerUltimasVentas(limit = 5): Promise<any[]> {
     const ventas = await this.ventaRepository.find({

@@ -128,7 +128,7 @@ export class InventarioService {
   async sincronizarYListarProductos(): Promise<any[]> {
     const productos = await this.productoRepository.find({
       where: {
-        tip_prod: In(['transformado', 'directo', 'combo']),
+        tip_prod: In(['transformado', 'directo', 'combo', 'insumo']),
       },
       relations: ['cate_prod'],
     });
