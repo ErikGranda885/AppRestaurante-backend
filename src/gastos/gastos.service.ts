@@ -10,7 +10,8 @@ import { UpdateGastoDto } from './dto/update-gasto.dto';
 import { format } from 'date-fns';
 import { Gasto } from './gasto.entity';
 import { CierreDiaService } from 'src/cierre_dia/cierre_dia.service';
-
+import { Workbook } from 'exceljs';
+import * as PdfPrinter from 'pdfmake';
 @Injectable()
 export class GastosService {
   constructor(
@@ -156,5 +157,136 @@ export class GastosService {
       total,
       cantidad: gastos.length,
     };
+  }
+
+  async exportarGastosExcel(): Promise<Buffer> {
+    const gastos = await this.gastoRepository.find();
+    if (!gastos.length) {
+      throw new NotFoundException('No existen gastos registrados');
+    }
+
+    const workbook = new Workbook();
+    const worksheet = workbook.addWorksheet('Gastos');
+
+    // Título
+    worksheet.mergeCells('A1:E1');
+    const titulo = worksheet.getCell('A1');
+    titulo.value = 'REPORTE DE GASTOS';
+    titulo.font = { size: 18, bold: true, color: { argb: '305496' } };
+    titulo.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // Encabezado
+    worksheet.addRow([
+      'ID',
+      'Descripción',
+      'Fecha',
+      'Monto ($)',
+      'Observación',
+    ]);
+    worksheet.getRow(2).eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.alignment = { horizontal: 'center' };
+      cell.border = {
+        top: { style: 'thin' },
+        bottom: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
+      };
+    });
+
+    // Datos
+    gastos.forEach((gasto) => {
+      worksheet.addRow([
+        gasto.id_gas,
+        gasto.desc_gas,
+        gasto.fech_gas ? format(new Date(gasto.fech_gas), 'dd/MM/yyyy') : '',
+        Number(gasto.mont_gas),
+        gasto.obs_gas || '',
+      ]);
+    });
+
+    // Ajuste automático
+    worksheet.columns.forEach((column, i) => {
+      let maxLength = 10;
+      if (column && typeof column.eachCell === 'function') {
+        column.eachCell({ includeEmpty: true }, (cell) => {
+          if (cell.value) {
+            const cellValue = cell.value.toString();
+            if (cellValue.length > maxLength) maxLength = cellValue.length;
+          }
+        });
+      }
+      worksheet.getColumn(i + 1).width = maxLength + 2;
+    });
+
+    return Buffer.from(await workbook.xlsx.writeBuffer());
+  }
+
+  async exportarGastosPDF(): Promise<Buffer> {
+    const gastos = await this.gastoRepository.find();
+    if (!gastos.length) {
+      throw new NotFoundException('No existen gastos registrados');
+    }
+
+    const fonts = {
+      Roboto: {
+        normal: 'Helvetica',
+        bold: 'Helvetica-Bold',
+        italics: 'Helvetica-Oblique',
+        bolditalics: 'Helvetica-BoldOblique',
+      },
+    };
+
+    const body: any[][] = [
+      [
+        { text: 'ID', bold: true },
+        { text: 'Descripción', bold: true },
+        { text: 'Fecha', bold: true },
+        { text: 'Monto ($)', bold: true },
+        { text: 'Observación', bold: true },
+      ],
+      ...gastos.map((g) => [
+        g.id_gas,
+        g.desc_gas,
+        g.fech_gas ? format(new Date(g.fech_gas), 'dd/MM/yyyy') : '',
+        Number(g.mont_gas).toFixed(2),
+        g.obs_gas || '',
+      ]),
+    ];
+
+    const printer = new PdfPrinter(fonts);
+    const docDefinition = {
+      content: [
+        { text: 'REPORTE DE GASTOS', style: 'header' },
+        '\n',
+        {
+          table: {
+            headerRows: 1,
+            widths: ['auto', '*', 'auto', 'auto', '*'],
+            body,
+          },
+          layout: 'lightHorizontalLines',
+        },
+      ],
+      styles: {
+        header: {
+          fontSize: 18,
+          bold: true,
+          alignment: 'center',
+          margin: [0, 0, 0, 10],
+        },
+      },
+      defaultStyle: {
+        font: 'Roboto',
+      },
+    };
+
+    return new Promise((resolve, reject) => {
+      const pdfDoc = printer.createPdfKitDocument(docDefinition);
+      const chunks: Uint8Array[] = [];
+      pdfDoc.on('data', (chunk) => chunks.push(chunk));
+      pdfDoc.on('end', () => resolve(Buffer.concat(chunks)));
+      pdfDoc.end();
+    });
   }
 }
