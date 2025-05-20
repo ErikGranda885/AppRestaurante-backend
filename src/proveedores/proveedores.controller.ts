@@ -8,6 +8,7 @@ import {
   Delete,
   HttpCode,
   Res,
+  InternalServerErrorException,
 } from '@nestjs/common';
 
 import { Proveedor } from './proveedor.entity';
@@ -82,6 +83,42 @@ export class ProveedoresController {
   @Get()
   listar(): Promise<Proveedor[]> {
     return this.servicio.listarProveedores();
+  }
+
+  @Get('reporte/excel')
+  async exportarExcel(@Res() res: Response) {
+    try {
+      const buffer = await this.servicio.exportarProveedoresExcel();
+
+      res.set({
+        'Content-Type':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition':
+          'attachment; filename="reporte-proveedores.xlsx"',
+      });
+
+      res.send(buffer);
+    } catch (error) {
+      console.error('Error al exportar Excel de proveedores:', error);
+      throw new InternalServerErrorException('Error al generar el Excel');
+    }
+  }
+
+  @Get('reporte/pdf')
+  async exportarPDF(@Res() res: Response) {
+    try {
+      const buffer = await this.servicio.exportarProveedoresPDF();
+
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': 'attachment; filename="reporte-proveedores.pdf"',
+      });
+
+      res.send(buffer);
+    } catch (error) {
+      console.error('Error al exportar PDF de proveedores:', error);
+      throw new InternalServerErrorException('Error al generar el PDF');
+    }
   }
 
   @Get(':id')
