@@ -7,6 +7,7 @@ import {
   Put,
   Query,
   Res,
+  HttpStatus,
 } from '@nestjs/common';
 import { Response } from 'express';
 import * as ExcelJS from 'exceljs';
@@ -14,7 +15,6 @@ import { UsuariosService } from './usuarios.service';
 import { CreateUsuarioDto } from './dto/create-usuario.dto';
 import { UpdateUsuarioDto } from './dto/update-usuario.dto';
 import { RolesService } from 'src/roles/roles.service';
-import { LoginUsuarioDto } from './dto/login-usuario.dto';
 
 @Controller('usuarios')
 export class UsuariosController {
@@ -96,6 +96,52 @@ export class UsuariosController {
   @Get()
   listar() {
     return this.usuariosService.listarUsuarios();
+  }
+
+  // 🚀 Endpoint para exportar usuarios en Excel
+  @Get('reporte/excel')
+  async exportarUsuariosExcel(@Res() res: Response) {
+    const buffer = await this.usuariosService.exportarUsuariosExcel();
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', 'attachment; filename=usuarios.xlsx');
+    res.status(HttpStatus.OK).send(buffer);
+  }
+
+  // 🚀 Endpoint para exportar usuarios en PDF
+  @Get('reporte/pdf')
+  async exportarUsuariosPDF(@Res() res: Response) {
+    const buffer = await this.usuariosService.exportarUsuariosPDF();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename=usuarios.pdf');
+    res.status(HttpStatus.OK).send(buffer);
+  }
+
+  @Get('reporte/rol/excel')
+  async exportarRolesExcel(@Res() res: Response) {
+    const buffer = await this.usuariosService.exportarRolesExcel();
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="reporte_roles.xlsx"',
+    );
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.status(HttpStatus.OK).send(buffer);
+  }
+
+  @Get('reporte/rol/pdf')
+  async exportarRolesPDF(@Res() res: Response) {
+    const buffer = await this.usuariosService.exportarRolesPDF();
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="reporte_roles.pdf"',
+    );
+    res.setHeader('Content-Type', 'application/pdf');
+    res.status(HttpStatus.OK).send(buffer);
   }
 
   @Get(':id')
