@@ -8,12 +8,15 @@ import {
   Patch,
   Query,
   ParseIntPipe,
+  Header,
+  Res,
+  HttpStatus,
 } from '@nestjs/common';
 import { CreateCierreDiarioDto } from './dto/create-cierreDiario.dto';
 import { Cierre_Dia } from './cierre_dia.entity';
 import { CierreDiaService } from './cierre_dia.service';
 import { FiltroCierreDto } from './dto/filtro-cierre.dto';
-
+import { Response } from 'express';
 @Controller('cierres')
 export class CierreDiaController {
   constructor(private readonly cierreDiaService: CierreDiaService) {}
@@ -38,7 +41,6 @@ export class CierreDiaController {
     });
   }
 
- 
   @Get()
   async listar(@Query() filtro: FiltroCierreDto): Promise<Cierre_Dia[]> {
     return this.cierreDiaService.listarTodosCierres(filtro);
@@ -60,6 +62,27 @@ export class CierreDiaController {
   @Get('movimientos/:fecha')
   async obtenerMovimientosDelDia(@Param('fecha') fecha: string) {
     return this.cierreDiaService.obtenerMovimientosDelDia(fecha);
+  }
+
+  // 🔽 Exportar Cierres - Excel
+  @Get('reporte/excel')
+  @Header(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  )
+  @Header('Content-Disposition', 'attachment; filename=reporte-cierres.xlsx')
+  async exportarExcel(@Res() res: Response) {
+    const buffer = await this.cierreDiaService.exportarCierresExcel();
+    res.status(HttpStatus.OK).send(buffer);
+  }
+
+  // 🔽 Exportar Cierres - PDF
+  @Get('reporte/pdf')
+  @Header('Content-Type', 'application/pdf')
+  @Header('Content-Disposition', 'attachment; filename=reporte-cierres.pdf')
+  async exportarPdf(@Res() res: Response) {
+    const buffer = await this.cierreDiaService.exportarCierresPDF();
+    res.status(HttpStatus.OK).send(buffer);
   }
 
   // Obtener un cierre por ID

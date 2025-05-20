@@ -12,7 +12,8 @@ import { Venta } from 'src/ventas/venta.entity';
 import { Gasto } from 'src/gastos/gasto.entity';
 import { Compras } from 'src/compras/compras.entity';
 import { FiltroCierreDto } from './dto/filtro-cierre.dto';
-
+import { Workbook } from 'exceljs';
+import * as PdfPrinter from 'pdfmake';
 @Injectable()
 export class CierreDiaService {
   private readonly logger = new Logger(CierreDiaService.name);
@@ -335,5 +336,163 @@ export class CierreDiaService {
       },
     });
     return anteriores.length > 0;
+  }
+
+  async exportarCierresExcel(): Promise<Buffer> {
+    const cierres = await this.cierreRepository.find({
+      order: { fech_cier: 'DESC' },
+    });
+    if (!cierres.length) {
+      throw new NotFoundException('No existen cierres registrados');
+    }
+
+    const workbook = new Workbook();
+    const worksheet = workbook.addWorksheet('Cierres');
+
+    worksheet.mergeCells('A1:I1');
+    const titulo = worksheet.getCell('A1');
+    titulo.value = 'REPORTE DE CIERRES DIARIOS';
+    titulo.font = { size: 18, bold: true, color: { argb: '305496' } };
+    titulo.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    worksheet.addRow([
+      'Fecha',
+      'Ventas ($)',
+      'Depósito ($)',
+      'Compras pagadas ($)',
+      'Gastos ($)',
+      'Diferencia ($)',
+      'Comprobante',
+      'Registrado por',
+      'Estado',
+    ]);
+
+    worksheet.getRow(2).eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.alignment = { horizontal: 'center' };
+      cell.border = {
+        top: { style: 'thin' },
+        bottom: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
+      };
+    });
+
+    cierres.forEach((c) => {
+      worksheet.addRow([
+        c.fech_cier,
+        Number(c.tot_vent_cier),
+        Number(c.tot_dep_cier ?? 0),
+        Number(c.tot_compras_pag_cier),
+        Number(c.tot_gas_cier),
+        Number(c.dif_cier),
+        c.comp_dep_cier || '',
+        c.usu_cier?.nom_usu || 'Desconocido',
+        c.esta_cier,
+      ]);
+    });
+
+    worksheet.columns.forEach((column, i) => {
+      let maxLength = 10;
+      if (column && typeof column.eachCell === 'function') {
+        column.eachCell({ includeEmpty: true }, (cell) => {
+          const length = cell.value?.toString().length || 0;
+          if (length > maxLength) maxLength = length;
+        });
+      }
+      worksheet.getColumn(i + 1).width = maxLength + 2;
+    });
+
+    return Buffer.from(await workbook.xlsx.writeBuffer());
+  }
+
+  async exportarCierresPDF(): Promise<Buffer> {
+    const cierres = await this.cierreRepository.find({
+      order: { fech_cier: 'DESC' },
+    });
+    if (!cierres.length) {
+      throw new NotFoundException('No existen cierres registrados');
+    }
+
+    const fonts = {
+      Roboto: {
+        normal: 'Helvetica',
+        bold: 'Helvetica-Bold',
+        italics: 'Helvetica-Oblique',
+        bolditalics: 'Helvetica-BoldOblique',
+      },
+    };
+
+    const body: any[][] = [
+      [
+        { text: 'Fecha', bold: true },
+        { text: 'Ventas ($)', bold: true },
+        { text: 'Depósito ($)', bold: true },
+        { text: 'Compras pagadas ($)', bold: true },
+        { text: 'Gastos ($)', bold: true },
+        { text: 'Diferencia ($)', bold: true },
+        { text: 'Comprobante', bold: true },
+        { text: 'Registrado por', bold: true },
+        { text: 'Estado', bold: true },
+      ],
+      ...cierres.map((c) => [
+        c.fech_cier,
+        Number(c.tot_vent_cier).toFixed(2),
+        Number(c.tot_dep_cier ?? 0).toFixed(2),
+        Number(c.tot_compras_pag_cier).toFixed(2),
+        Number(c.tot_gas_cier).toFixed(2),
+        Number(c.dif_cier).toFixed(2),
+        c.comp_dep_cier || '',
+        c.usu_cier?.nom_usu || 'Desconocido',
+        c.esta_cier,
+      ]),
+    ];
+
+    const printer = new PdfPrinter(fonts);
+    const docDefinition = {
+      pageOrientation: 'landscape',
+      content: [
+        { text: 'REPORTE DE CIERRES DIARIOS', style: 'header' },
+        '\n',
+        {
+          table: {
+            headerRows: 1,
+            widths: [
+              'auto',
+              'auto',
+              'auto',
+              'auto',
+              'auto',
+              'auto',
+              '*',
+              '*',
+              'auto',
+            ],
+            body,
+          },
+          layout: 'lightHorizontalLines',
+        },
+      ],
+      styles: {
+        header: {
+          fontSize: 18,
+          bold: true,
+          alignment: 'center',
+          margin: [0, 0, 0, 10],
+          color: '#305496',
+        },
+      },
+      defaultStyle: {
+        font: 'Roboto',
+      },
+    };
+
+    return new Promise((resolve, reject) => {
+      const pdfDoc = printer.createPdfKitDocument(docDefinition);
+      const chunks: Uint8Array[] = [];
+      pdfDoc.on('data', (chunk) => chunks.push(chunk));
+      pdfDoc.on('end', () => resolve(Buffer.concat(chunks)));
+      pdfDoc.end();
+    });
   }
 }
