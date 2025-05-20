@@ -4,7 +4,14 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { differenceInDays, format } from 'date-fns';
+import {
+  differenceInCalendarDays,
+  differenceInDays,
+  endOfDay,
+  format,
+  isValid,
+  startOfDay,
+} from 'date-fns';
 import { Producto } from 'src/productos/producto.entity';
 import { In, MoreThan, Repository, DataSource, IsNull, Not } from 'typeorm';
 import { Lote } from 'src/lotes/lote.entity';
@@ -204,24 +211,32 @@ export class InventarioService {
         order: { fecha_venc_lote: 'ASC' },
       });
 
-      if (lote && lote.fecha_venc_lote) {
-        const hoy = new Date();
-        const fechaVencimiento = new Date(lote.fecha_venc_lote);
-        const diasRestantes = differenceInDays(fechaVencimiento, hoy);
+      if (lote && lote.fecha_venc_lote !== null) {
+        const fechaVencimiento = endOfDay(new Date(lote.fecha_venc_lote));
+        const hoy = startOfDay(new Date());
+
+        if (!isValid(fechaVencimiento)) continue;
+
+        const diasRestantes =
+          differenceInCalendarDays(fechaVencimiento, hoy) + 1;
 
         if (diasRestantes >= 0) {
           productosPorCaducar.push({
             id: producto.id_prod,
             name: producto.nom_prod,
             img: producto.img_prod,
-            expiresIn: `${diasRestantes} días`,
+            expiresIn: `${diasRestantes} día${diasRestantes !== 1 ? 's' : ''}`,
           });
         }
       }
     }
 
     return productosPorCaducar
-      .sort((a, b) => parseInt(a.expiresIn) - parseInt(b.expiresIn))
+      .sort(
+        (a, b) =>
+          parseInt(a.expiresIn.replace(/\D/g, '')) -
+          parseInt(b.expiresIn.replace(/\D/g, '')),
+      )
       .slice(0, limit);
   }
 }

@@ -10,6 +10,7 @@ import { Producto } from 'src/productos/producto.entity';
 import { CreateRecetaDto } from './dto/create-receta.dto';
 import { UpdateRecetaDto } from './dto/update-receta.dto';
 import { Det_Receta } from 'src/dets_recetas/det_receta.entity';
+import { Transformacion } from 'src/transformaciones/transformacion.entity';
 
 @Injectable()
 export class RecetasService {
@@ -22,6 +23,8 @@ export class RecetasService {
 
     @InjectRepository(Det_Receta)
     private detRecetaRepository: Repository<Det_Receta>,
+    @InjectRepository(Transformacion)
+    private transformacionRepository: Repository<Transformacion>, // ✅ nuevo
   ) {}
 
   // Crear una receta con ingredientes
@@ -98,6 +101,18 @@ export class RecetasService {
   ): Promise<{ message: string; receta: Receta }> {
     const receta = await this.obtenerReceta(id);
 
+    // ✅ Validar si ya fue usada
+    const usada = await this.transformacionRepository.exist({
+      where: { rece_trans: { id_rec: id } },
+    });
+
+    if (usada) {
+      throw new BadRequestException(
+        'Esta receta ya ha sido utilizada en transformaciones y no puede modificarse.',
+      );
+    }
+
+    // seguir si no ha sido usada...
     if (updateDto.prod_rec) {
       const producto = await this.productoRepository.findOne({
         where: { id_prod: updateDto.prod_rec },
@@ -124,7 +139,23 @@ export class RecetasService {
   // Eliminar receta
   async eliminarReceta(id: number): Promise<{ message: string }> {
     const receta = await this.obtenerReceta(id);
-    await this.recetaRepository.remove(receta);
+
+    // 🔒 Verificar si ya ha sido utilizada en transformaciones
+    const usada = await this.transformacionRepository.exist({
+      where: { rece_trans: { id_rec: id } },
+    });
+
+    if (usada) {
+      throw new BadRequestException(
+        'Esta receta ya ha sido utilizada en transformaciones y no puede eliminarse.',
+      );
+    }
+
+    // ✅ Eliminar ingredientes asociados primero
+    await this.detRecetaRepository.delete({ recet_rec: { id_rec: id } });
+
+    // ✅ Eliminar la receta
+    await this.recetaRepository.delete(id);
 
     return {
       message: 'Receta eliminada correctamente',
