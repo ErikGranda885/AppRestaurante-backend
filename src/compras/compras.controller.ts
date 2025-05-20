@@ -7,12 +7,13 @@ import {
   Delete,
   Put,
   ParseIntPipe,
+  Res,
 } from '@nestjs/common';
 import { ComprasService } from './compras.service';
 import { CreateCompraDto } from './dto/create-compra.dto';
 import { UpdateCompraDto } from './dto/update-compra.dto';
 import { Compras } from './compras.entity';
-
+import { Response } from 'express';
 @Controller('compras')
 export class ComprasController {
   constructor(private readonly comprasService: ComprasService) {}
@@ -21,6 +22,46 @@ export class ComprasController {
   @Get()
   async listar(): Promise<Compras[]> {
     return await this.comprasService.obtenerCompras();
+  }
+
+  @Get('reporte/excel')
+  async exportarExcel(@Res() res: Response) {
+    try {
+      const buffer = await this.comprasService.exportarComprasExcel();
+
+      res.set({
+        'Content-Type':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename="reporte-compras.xlsx"',
+      });
+
+      res.send(buffer);
+    } catch (error) {
+      console.error('Error al exportar compras (Excel):', error);
+      res.status(error.status || 500).json({
+        statusCode: error.status || 500,
+        message: error.message || 'Error interno al generar el reporte',
+      });
+    }
+  }
+
+  @Get('reporte/pdf')
+  async exportarPDF(@Res() res: Response) {
+    try {
+      const buffer = await this.comprasService.exportarComprasPDF();
+
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': 'attachment; filename="reporte-compras.pdf"',
+      });
+      res.send(buffer);
+    } catch (error) {
+      console.error('Error al exportar compras (PDF):', error);
+      res.status(error.status || 500).json({
+        statusCode: error.status || 500,
+        message: error.message || 'Error interno al generar el reporte PDF',
+      });
+    }
   }
 
   // GET /compras/:id

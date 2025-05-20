@@ -11,7 +11,8 @@ import { CreateCompraDto } from './dto/create-compra.dto';
 import { UpdateCompraDto } from './dto/update-compra.dto';
 import { CierreDiaService } from 'src/cierre_dia/cierre_dia.service';
 import { format } from 'date-fns';
-
+import { Workbook } from 'exceljs';
+import * as PdfPrinter from 'pdfmake';
 @Injectable()
 export class ComprasService {
   constructor(
@@ -205,5 +206,166 @@ export class ComprasService {
     }
 
     return compraActualizada;
+  }
+
+  async exportarComprasExcel(): Promise<Buffer> {
+    const compras = await this.comprasRepository.find();
+
+    if (!compras.length) {
+      throw new NotFoundException('No existen compras registradas');
+    }
+
+    const workbook = new Workbook();
+    const worksheet = workbook.addWorksheet('Compras');
+
+    // Título
+    worksheet.mergeCells('A1:I1');
+    const titulo = worksheet.getCell('A1');
+    titulo.value = 'REPORTE DE COMPRAS';
+    titulo.font = { size: 18, bold: true, color: { argb: '305496' } };
+    titulo.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // Encabezados
+    worksheet.addRow([
+      'ID',
+      'Fecha',
+      'Tipo Documento',
+      'Nro Documento',
+      'Proveedor',
+      'Registrado por',
+      'Forma de Pago',
+      'Estado de Pago',
+      'Total ($)',
+    ]);
+
+    // Estilo de encabezados
+    worksheet.getRow(2).eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.alignment = { horizontal: 'center' };
+      cell.border = {
+        top: { style: 'thin' },
+        bottom: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
+      };
+    });
+
+    // Filas de datos
+    compras.forEach((compra) => {
+      worksheet.addRow([
+        compra.id_comp,
+        format(new Date(compra.fech_comp), 'dd/MM/yyyy'),
+        compra.tipo_doc_comp,
+        compra.num_doc_comp,
+        compra.prov_comp['nom_prov'] || 'Desconocido',
+        compra.usu_comp['nom_usu'] || 'Desconocido',
+        compra.form_pag_comp,
+        compra.estado_pag_comp,
+        Number(compra.tot_comp),
+      ]);
+    });
+
+    // Ajuste automático de columnas
+    worksheet.columns.forEach((column) => {
+      if (column && column.eachCell) {
+        let maxLength = 10;
+        column.eachCell({ includeEmpty: true }, (cell) => {
+          const length = cell.value ? cell.value.toString().length : 0;
+          if (length > maxLength) maxLength = length;
+        });
+        column.width = maxLength + 2;
+      }
+    });
+
+    return Buffer.from(await workbook.xlsx.writeBuffer());
+  }
+
+  async exportarComprasPDF(): Promise<Buffer> {
+    const compras = await this.comprasRepository.find({
+      relations: ['prov_comp', 'usu_comp'],
+    });
+
+    if (!compras.length) {
+      throw new NotFoundException('No existen compras registradas');
+    }
+
+    const fonts = {
+      Roboto: {
+        normal: 'Helvetica',
+        bold: 'Helvetica-Bold',
+        italics: 'Helvetica-Oblique',
+        bolditalics: 'Helvetica-BoldOblique',
+      },
+    };
+
+    const body: any[][] = [
+      [
+        { text: 'ID', bold: true },
+        { text: 'Fecha', bold: true },
+        { text: 'Tipo Doc', bold: true },
+        { text: 'Nro Doc', bold: true },
+        { text: 'Proveedor', bold: true },
+        { text: 'Registrado por', bold: true },
+        { text: 'Forma Pago', bold: true },
+        { text: 'Estado Pago', bold: true },
+        { text: 'Total ($)', bold: true },
+      ],
+      ...compras.map((c) => [
+        c.id_comp,
+        format(new Date(c.fech_comp), 'dd/MM/yyyy'),
+        c.tipo_doc_comp,
+        c.num_doc_comp,
+        c.prov_comp?.['nom_prov'] || 'Desconocido',
+        c.usu_comp?.['nom_usu'] || 'Desconocido',
+        c.form_pag_comp,
+        c.estado_pag_comp,
+        Number(c.tot_comp).toFixed(2),
+      ]),
+    ];
+
+    const printer = new PdfPrinter(fonts);
+    const docDefinition = {
+      content: [
+        { text: 'REPORTE DE COMPRAS', style: 'header' },
+        '\n',
+        {
+          table: {
+            headerRows: 1,
+            widths: [
+              'auto',
+              'auto',
+              'auto',
+              'auto',
+              '*',
+              '*',
+              'auto',
+              'auto',
+              'auto',
+            ],
+            body,
+          },
+          layout: 'lightHorizontalLines',
+        },
+      ],
+      styles: {
+        header: {
+          fontSize: 18,
+          bold: true,
+          alignment: 'center',
+          margin: [0, 0, 0, 10],
+        },
+      },
+      defaultStyle: {
+        font: 'Roboto',
+      },
+    };
+
+    return new Promise((resolve, reject) => {
+      const pdfDoc = printer.createPdfKitDocument(docDefinition);
+      const chunks: Uint8Array[] = [];
+      pdfDoc.on('data', (chunk) => chunks.push(chunk));
+      pdfDoc.on('end', () => resolve(Buffer.concat(chunks)));
+      pdfDoc.end();
+    });
   }
 }

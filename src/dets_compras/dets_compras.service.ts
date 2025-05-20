@@ -135,4 +135,6 @@ export class DetCompraService {
       relations: ['comp_dcom', 'prod_dcom'],
     });
   }
+
+  
 }
