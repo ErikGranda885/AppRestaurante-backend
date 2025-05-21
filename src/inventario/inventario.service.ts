@@ -92,6 +92,8 @@ export class InventarioService {
       }
 
       await queryRunner.commitTransaction();
+      // 🔄 Actualiza el stock total de productos
+      await this.sincronizarYListarProductos();
       return lotesUsados;
     } catch (error) {
       await queryRunner.rollbackTransaction();
