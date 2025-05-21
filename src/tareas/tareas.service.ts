@@ -19,11 +19,17 @@ export class TareasService implements OnModuleInit {
   ) {}
 
   private obtenerFechaLocal(): string {
-    const fechaLocal = new Date();
-    fechaLocal.setMinutes(
-      fechaLocal.getMinutes() - fechaLocal.getTimezoneOffset(),
-    );
-    return fechaLocal.toISOString().split('T')[0];
+    const fecha = new Date();
+    const year = fecha.getFullYear();
+    const month = String(fecha.getMonth() + 1).padStart(2, '0');
+    const day = String(fecha.getDate()).padStart(2, '0');
+    const fechaFinal = `${year}-${month}-${day}`;
+
+    // Log para verificar en consola del servidor
+    console.log(`📅 Fecha local generada: ${fechaFinal}`);
+    this.logger.log(`📅 Fecha local generada: ${fechaFinal}`);
+
+    return fechaFinal;
   }
 
   private async ejecutarCreacionCierreDiario() {
