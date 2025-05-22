@@ -25,7 +25,6 @@ export class TareasService implements OnModuleInit {
     const day = String(fecha.getDate()).padStart(2, '0');
     const fechaFinal = `${year}-${month}-${day}`;
 
-    // Log para verificar en consola del servidor
     console.log(`📅 Fecha local generada: ${fechaFinal}`);
     this.logger.log(`📅 Fecha local generada: ${fechaFinal}`);
 
@@ -55,7 +54,6 @@ export class TareasService implements OnModuleInit {
   async onModuleInit() {
     await this.usuariosService.crearUsuarioSistemaSiNoExiste();
 
-    // Mostrar horas actuales antes de registrar los cron jobs
     const creacionHora = await this.configuracionesService.obtenerValorPorClave(
       'cierre_creacion_hora',
     );
@@ -68,7 +66,6 @@ export class TareasService implements OnModuleInit {
       `🕒 Configuración de horarios: Creación: ${creacionHora ?? 'no definido'}, Verificación: ${verificacionHora ?? 'no definido'}`,
     );
 
-    // Registrar cron jobs que escuchan cambios
     this.registrarDynamicCronJob(
       'cierre-creacion-diaria',
       () => this.ejecutarCreacionCierreDiario(),
@@ -81,8 +78,9 @@ export class TareasService implements OnModuleInit {
       'cierre_verificacion_hora',
     );
 
-    // Ejecutar una vez al iniciar
+    // Al iniciar, ejecuta inmediatamente:
     await this.ejecutarCreacionCierreDiario();
+    await this.verificarCierreAnteriorNoActualizado();
   }
 
   private registrarDynamicCronJob(
@@ -136,6 +134,32 @@ export class TareasService implements OnModuleInit {
     } else {
       this.logger.log(
         `ℹ️ No hay cierres 'por cerrar' para actualizar en ${fecha}`,
+      );
+    }
+  }
+
+  private async verificarCierreAnteriorNoActualizado() {
+    const ayer = new Date();
+    ayer.setDate(ayer.getDate() - 1);
+
+    const year = ayer.getFullYear();
+    const month = String(ayer.getMonth() + 1).padStart(2, '0');
+    const day = String(ayer.getDate()).padStart(2, '0');
+    const fechaAyer = `${year}-${month}-${day}`;
+
+    const cierres = await this.cierreService.listarCierresPorCerrar({
+      desde: fechaAyer,
+      hasta: fechaAyer,
+    });
+
+    if (cierres.length > 0) {
+      const cierre = cierres[0];
+      await this.cierreService.actualizarEstadoCierre(
+        cierre.id_cier,
+        'pendiente',
+      );
+      this.logger.warn(
+        `⚠️ Cierre de ${fechaAyer} quedó por cerrar y fue actualizado a 'pendiente' al iniciar el servidor`,
       );
     }
   }
