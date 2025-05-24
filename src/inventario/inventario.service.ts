@@ -34,6 +34,14 @@ export class InventarioService {
     private dataSource: DataSource,
   ) {}
 
+  private normalizarTexto(texto: string): string {
+    return texto
+      .normalize('NFD') // descompone acentos
+      .replace(/[\u0300-\u036f]/g, '') // elimina acentos
+      .replace(/\s/g, '') // elimina espacios
+      .toLowerCase(); // a minúsculas
+  }
+
   async consumirProductoPorLote(
     prodId: number,
     cantidad: number,
@@ -288,26 +296,26 @@ export class InventarioService {
       throw new BadRequestException('Nombre de producto vacío');
     }
 
-    // Intentamos encontrar coincidencia exacta (case- & accent-insensitive)
-    const producto = await this.productoRepository.findOne({
-      where: { nom_prod: ILike(nombreClean) },
-    });
+    const normalizado = this.normalizarTexto(nombreClean);
+
+    const productos = await this.productoRepository.find();
+
+    const producto = productos.find(
+      (p) => this.normalizarTexto(p.nom_prod) === normalizado,
+    );
 
     if (producto) {
-      // Si existe, sincronizamos y devolvemos stock
       const actualizado = await this.sincronizarYObtenerProducto(
         producto.id_prod,
       );
       return { stock: actualizado.stock_prod };
     }
 
-    // Si no existe, buscamos hasta 3 sugerencias usando ILike %texto%
-    const similares = await this.productoRepository.find({
-      where: { nom_prod: ILike(`%${nombreClean}%`) },
-      take: 3,
-    });
-    const suggestions = similares.map((p) => p.nom_prod);
+    const sugerencias = productos
+      .filter((p) => this.normalizarTexto(p.nom_prod).includes(normalizado))
+      .slice(0, 3)
+      .map((p) => p.nom_prod);
 
-    return { suggestions };
+    return { suggestions: sugerencias };
   }
 }
