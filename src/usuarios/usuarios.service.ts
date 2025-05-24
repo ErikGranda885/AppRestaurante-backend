@@ -193,6 +193,7 @@ export class UsuariosService {
       usuario: usuarioInactivado,
     };
   }
+  
   async activarUsuario(
     id: number,
     updateUsuarioDto?: UpdateUsuarioDto,

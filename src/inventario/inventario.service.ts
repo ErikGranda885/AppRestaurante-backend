@@ -13,7 +13,15 @@ import {
   startOfDay,
 } from 'date-fns';
 import { Producto } from 'src/productos/producto.entity';
-import { In, MoreThan, Repository, DataSource, IsNull, Not } from 'typeorm';
+import {
+  In,
+  MoreThan,
+  Repository,
+  DataSource,
+  IsNull,
+  Not,
+  ILike,
+} from 'typeorm';
 import { Lote } from 'src/lotes/lote.entity';
 
 @Injectable()
@@ -270,5 +278,36 @@ export class InventarioService {
           parseInt(b.expiresIn.replace(/\D/g, '')),
       )
       .slice(0, limit);
+  }
+
+  async obtenerStockPorNombre(
+    nombre: string,
+  ): Promise<{ stock?: number; suggestions?: string[] }> {
+    const nombreClean = nombre.trim();
+    if (!nombreClean) {
+      throw new BadRequestException('Nombre de producto vacío');
+    }
+
+    // Intentamos encontrar coincidencia exacta (case- & accent-insensitive)
+    const producto = await this.productoRepository.findOne({
+      where: { nom_prod: ILike(nombreClean) },
+    });
+
+    if (producto) {
+      // Si existe, sincronizamos y devolvemos stock
+      const actualizado = await this.sincronizarYObtenerProducto(
+        producto.id_prod,
+      );
+      return { stock: actualizado.stock_prod };
+    }
+
+    // Si no existe, buscamos hasta 3 sugerencias usando ILike %texto%
+    const similares = await this.productoRepository.find({
+      where: { nom_prod: ILike(`%${nombreClean}%`) },
+      take: 3,
+    });
+    const suggestions = similares.map((p) => p.nom_prod);
+
+    return { suggestions };
   }
 }

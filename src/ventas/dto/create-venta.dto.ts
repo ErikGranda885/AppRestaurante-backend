@@ -9,7 +9,7 @@ export class CreateVentaDto {
   usu_vent: number;
 
   @IsNotEmpty()
-  @Type(() => Date) 
+  @Type(() => Date)
   fech_vent: Date;
 
   @IsOptional()

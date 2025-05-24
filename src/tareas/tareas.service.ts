@@ -92,12 +92,9 @@ export class TareasService implements OnModuleInit {
       try {
         const horaConfig =
           await this.configuracionesService.obtenerValorPorClave(claveConfig);
-
         if (!horaConfig || !horaConfig.includes(':')) return;
-
         const [h, m] = horaConfig.split(':').map(Number);
         if (isNaN(h) || isNaN(m)) return;
-
         const ahora = new Date();
         if (ahora.getHours() === h && ahora.getMinutes() === m) {
           this.logger.log(
@@ -109,10 +106,8 @@ export class TareasService implements OnModuleInit {
         this.logger.error(`❌ Error en cron '${nombre}':`, error);
       }
     });
-
     this.schedulerRegistry.addCronJob(nombre, job);
     job.start();
-
     this.logger.log(
       `✅ Cron dinámico '${nombre}' activo (escuchando '${claveConfig}')`,
     );

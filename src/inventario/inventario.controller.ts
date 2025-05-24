@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
 } from '@nestjs/common';
 import { InventarioService } from './inventario.service';
 import { Lote } from 'src/lotes/lote.entity';
@@ -51,5 +52,12 @@ export class InventarioController {
   @Get('caducar')
   async ObtenerProductosPorCaducar() {
     return this.inventarioService.obtenerProductosPorCaducar();
+  }
+
+  // Nuevo endpoint para obtener stock por nombre de producto
+  @Get('stock')
+  async stock(@Query('nombre') nombre: string) {
+    const result = await this.inventarioService.obtenerStockPorNombre(nombre);
+    return result;
   }
 }

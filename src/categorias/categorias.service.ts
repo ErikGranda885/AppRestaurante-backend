@@ -255,7 +255,6 @@ export class CategoriasService {
     if (!categorias.length) {
       throw new NotFoundException('No existen categorías registradas');
     }
-
     const fonts = {
       Roboto: {
         normal: 'Helvetica',
@@ -264,7 +263,6 @@ export class CategoriasService {
         bolditalics: 'Helvetica-BoldOblique',
       },
     };
-
     const body: any[][] = [
       [
         { text: 'ID', bold: true },
@@ -279,7 +277,6 @@ export class CategoriasService {
         new Date().toLocaleDateString('es-EC'),
       ]),
     ];
-
     const printer = new PdfPrinter(fonts);
     const docDefinition = {
       content: [
@@ -306,8 +303,7 @@ export class CategoriasService {
         font: 'Roboto',
       },
     };
-
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const pdfDoc = printer.createPdfKitDocument(docDefinition);
       const chunks: Uint8Array[] = [];
       pdfDoc.on('data', (chunk) => chunks.push(chunk));
