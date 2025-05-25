@@ -714,4 +714,6 @@ export class VentasService {
       pdfDoc.end();
     });
   }
+
+  
 }

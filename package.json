@@ -34,6 +34,7 @@
     "crypto-js": "^4.2.0",
     "date-fns": "^4.1.0",
     "exceljs": "^4.4.0",
+    "fastest-levenshtein": "^1.0.16",
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.12.0",
     "pdfmake": "^0.2.20",

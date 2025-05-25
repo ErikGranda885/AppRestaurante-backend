@@ -168,6 +168,15 @@ export class VentasController {
     res.send(buffer);
   }
 
+  // GET /ventas/total?fecha=2025-05-24
+  @Get('total')
+  async obtenerTotalVentasDelDia(@Query('fecha') fecha: string) {
+    if (!fecha) {
+      throw new BadRequestException('El parámetro "fecha" es requerido');
+    }
+    return await this.ventasService.calcularTotalVentasPorFecha(fecha);
+  }
+
   // Obtener una venta por su id
   @Get(':id')
   async obtenerVenta(@Param('id') id: string) {
