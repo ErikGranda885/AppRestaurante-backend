@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, MoreThan, Repository } from 'typeorm';
+import { Between, DataSource, In, MoreThan, Repository } from 'typeorm';
 import { Transformacion } from './transformacion.entity';
 import { CreateTransformacionDto } from './dto/create-transformacion.dto';
 import { UpdateTransformacionDto } from './dto/update-transformacion.dto';
@@ -274,5 +274,24 @@ export class TransformacionesService {
     await this.transformacionesRepository.remove(transformacion);
 
     return { message: 'Transformación eliminada correctamente' };
+  }
+
+  async listarPorFecha(fecha: string): Promise<any[]> {
+    const inicio = new Date(`${fecha}T00:00:00`);
+    const fin = new Date(`${fecha}T23:59:59`);
+
+    return await this.transformacionesRepository
+      .createQueryBuilder('trans')
+      .leftJoin('trans.rece_trans', 'receta')
+      .leftJoin('receta.prod_rec', 'producto')
+      .select('receta.id_rec', 'id_rec')
+      .addSelect('receta.nom_rec', 'nombre_receta')
+      .addSelect('producto.nom_prod', 'nombre_producto')
+      .addSelect('SUM(trans.cant_prod_trans)', 'total')
+      .where('trans.fecha_trans BETWEEN :inicio AND :fin', { inicio, fin })
+      .groupBy('receta.id_rec')
+      .addGroupBy('receta.nom_rec')
+      .addGroupBy('producto.nom_prod')
+      .getRawMany();
   }
 }

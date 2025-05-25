@@ -46,6 +46,11 @@ export class TransformacionesController {
     };
   }
 
+  @Get('porFecha/:fecha')
+  async obtenerPorFecha(@Param('fecha') fecha: string) {
+    return this.transformacionesService.listarPorFecha(fecha);
+  }
+
   // Obtener una transformación específica
   @Get(':id')
   async listarTransformacion(@Param('id') id: number) {
