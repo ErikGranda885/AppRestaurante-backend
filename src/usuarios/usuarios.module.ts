@@ -9,6 +9,7 @@ import { UsuariosController } from './usuarios.controller';
 import { RolesModule } from 'src/roles/roles.module';
 import { ConfiguracionesModule } from 'src/configuraciones/configuraciones.module'; // ✅ importa configuraciones
 import { AuthModule } from 'src/auth/auth.module';
+import { UsuariosGateway } from 'src/gateways/usuarios.gateway';
 
 @Module({
   imports: [
@@ -17,8 +18,8 @@ import { AuthModule } from 'src/auth/auth.module';
     ConfiguracionesModule,
     AuthModule, // ✅ añade este import para solucionar el error
   ],
-  providers: [UsuariosService],
+  providers: [UsuariosService, UsuariosGateway],
   controllers: [UsuariosController],
-  exports: [UsuariosService],
+  exports: [UsuariosService, UsuariosGateway],
 })
 export class UsuariosModule {}

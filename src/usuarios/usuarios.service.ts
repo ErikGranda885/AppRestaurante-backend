@@ -17,6 +17,7 @@ import { ConfiguracionesService } from 'src/configuraciones/configuraciones.serv
 import { Workbook } from 'exceljs';
 import * as PdfPrinter from 'pdfmake';
 import { writeFile } from 'fs/promises';
+import { UsuariosGateway } from 'src/gateways/usuarios.gateway';
 @Injectable()
 export class UsuariosService {
   constructor(
@@ -27,6 +28,7 @@ export class UsuariosService {
     private dataSource: DataSource,
     private jwtService: JwtService,
     private configuracionesService: ConfiguracionesService,
+    private readonly usuariosGateway: UsuariosGateway,
   ) {}
   async crearUsuariosMasivo(
     createUsuariosDto: CreateUsuarioDto[],
@@ -74,6 +76,9 @@ export class UsuariosService {
         usuariosCreados.push(usuarioGuardado);
       }
       await queryRunner.commitTransaction();
+      // 👇 Emitimos el evento al finalizar correctamente
+      this.usuariosGateway.emitirActualizacionUsuarios();
+      console.log("📡 Evento 'usuarios-actualizados' emitido por carga masiva");
       return { usuarios: usuariosCreados, errors: [] };
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -116,6 +121,9 @@ export class UsuariosService {
     });
 
     const usuarioGuardado = await this.usuarioRepository.save(usuario);
+    // 👇 Emitimos el evento por socket
+    this.usuariosGateway.emitirActualizacionUsuarios();
+    console.log("✅ Evento 'usuarios-actualizados' emitido");
     return {
       message: 'Usuario creado correctamente',
       usuario: usuarioGuardado,
@@ -166,7 +174,9 @@ export class UsuariosService {
     // Asigna el resto de los campos del DTO al usuario
     Object.assign(usuario, updateUsuarioDto);
     const usuarioActualizado = await this.usuarioRepository.save(usuario);
-
+    // 👇 Emitimos el evento para que se actualice el frontend
+    this.usuariosGateway.emitirActualizacionUsuarios();
+    console.log("📡 Evento 'usuarios-actualizados' emitido por actualización");
     return {
       message: 'Usuario actualizado correctamente',
       usuario: usuarioActualizado,
@@ -187,7 +197,9 @@ export class UsuariosService {
     }
 
     const usuarioInactivado = await this.usuarioRepository.save(usuario);
-
+    // 👇 Emitimos evento para actualizar en tiempo real
+    this.usuariosGateway.emitirActualizacionUsuarios();
+    console.log("📡 Evento 'usuarios-actualizados' emitido por inactivación");
     return {
       message: 'Usuario inactivado correctamente',
       usuario: usuarioInactivado,
@@ -209,7 +221,9 @@ export class UsuariosService {
     }
 
     const usuarioActivado = await this.usuarioRepository.save(usuario);
-
+    // 👇 Emitimos evento para actualizar en tiempo real
+    this.usuariosGateway.emitirActualizacionUsuarios();
+    console.log("📡 Evento 'usuarios-actualizados' emitido por activación");
     return {
       message: 'Usuario activado correctamente',
       usuario: usuarioActivado,
@@ -221,6 +235,7 @@ export class UsuariosService {
     });
     return !!usuario;
   }
+
   async login(
     loginUsuarioDto: LoginUsuarioDto,
   ): Promise<{ message: string; usuario: Usuario; token: string }> {

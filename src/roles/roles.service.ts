@@ -8,12 +8,14 @@ import { Rol } from './rol.entity';
 import { CreateRolDto } from './dto/create-rol.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { RolesGateway } from 'src/gateways/roles.gateway';
 
 @Injectable()
 export class RolesService {
   constructor(
     @InjectRepository(Rol)
     private rolesRepository: Repository<Rol>,
+    private readonly rolesGateway: RolesGateway,
   ) {}
 
   async crearRol(
@@ -29,6 +31,9 @@ export class RolesService {
     }
     const rol = this.rolesRepository.create(createRolDto);
     const rolGuardado = await this.rolesRepository.save(rol);
+    // 👇 Emitimos el evento WebSocket
+    this.rolesGateway.emitirActualizacionRoles();
+    console.log("📡 Evento 'roles-actualizados' emitido");
     return {
       message: 'Rol creado correctamente',
       rol: rolGuardado,
