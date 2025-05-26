@@ -8,6 +8,7 @@ import {
   Query,
   Res,
   HttpStatus,
+  HttpCode,
 } from '@nestjs/common';
 import { Response } from 'express';
 import * as ExcelJS from 'exceljs';
@@ -181,12 +182,5 @@ export class UsuariosController {
   @Post('masivo')
   async crearBulk(@Body() createUsuariosDto: CreateUsuarioDto[]) {
     return this.usuariosService.crearUsuariosMasivo(createUsuariosDto);
-  }
-
-  @Post('google')
-  async loginConGoogle(
-    @Body() body: { email: string; nombre: string; foto?: string },
-  ) {
-    return this.usuariosService.loginDesdeGoogle(body);
   }
 }

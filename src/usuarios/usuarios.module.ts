@@ -8,16 +8,14 @@ import { UsuariosService } from './usuarios.service';
 import { UsuariosController } from './usuarios.controller';
 import { RolesModule } from 'src/roles/roles.module';
 import { ConfiguracionesModule } from 'src/configuraciones/configuraciones.module'; // ✅ importa configuraciones
+import { AuthModule } from 'src/auth/auth.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Usuario, Rol]),
-    JwtModule.register({
-      secret: process.env.JWT_SECRET || 'secretKey', // usa variables de entorno en prod
-      signOptions: { expiresIn: '1h' },
-    }),
     RolesModule,
-    ConfiguracionesModule, // ✅ añade este import para solucionar el error
+    ConfiguracionesModule,
+    AuthModule, // ✅ añade este import para solucionar el error
   ],
   providers: [UsuariosService],
   controllers: [UsuariosController],

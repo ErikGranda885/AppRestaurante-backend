@@ -193,7 +193,7 @@ export class UsuariosService {
       usuario: usuarioInactivado,
     };
   }
-  
+
   async activarUsuario(
     id: number,
     updateUsuarioDto?: UpdateUsuarioDto,
@@ -228,6 +228,7 @@ export class UsuariosService {
 
     const usuario = await this.usuarioRepository.findOne({
       where: { email_usu },
+      relations: ['rol_usu'], // ✅ Asegúrate de incluirlo
     });
 
     if (!usuario) {
@@ -271,7 +272,15 @@ export class UsuariosService {
     usuario.intentos_login = 0;
     await this.usuarioRepository.save(usuario);
 
-    const payload = { id: usuario.id_usu, email: usuario.email_usu };
+    const payload = {
+      id: usuario.id_usu,
+      email: usuario.email_usu,
+      rol: usuario.rol_usu.nom_rol,
+    };
+
+    console.log('📦 Payload:', payload);
+    console.log('🔐 JWT_SECRET usado en firma:', process.env.JWT_SECRET);
+
     const token = this.jwtService.sign(payload);
 
     return { message: 'Login exitoso', usuario, token };
@@ -308,7 +317,11 @@ export class UsuariosService {
       await this.usuarioRepository.save(usuario);
     }
 
-    const payload = { id: usuario.id_usu, email: usuario.email_usu };
+    const payload = {
+      id: usuario.id_usu,
+      email: usuario.email_usu,
+      rol: usuario.rol_usu.nom_rol, // ✅ importante
+    };
     const token = this.jwtService.sign(payload);
 
     return { usuario, token };
