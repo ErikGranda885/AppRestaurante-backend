@@ -10,6 +10,7 @@ import { CreateCategoriaDto } from './dto/create-categoria.dto';
 import { UpdateCategoriaDto } from './dto/update-categoria.dto';
 import { Workbook } from 'exceljs';
 import * as PdfPrinter from 'pdfmake';
+import { CategoriasGateway } from 'src/gateways/categorias.gateway';
 
 @Injectable()
 export class CategoriasService {
@@ -17,6 +18,7 @@ export class CategoriasService {
     @InjectRepository(Categoria)
     private categoriasRepository: Repository<Categoria>,
     private dataSource: DataSource,
+    private categoriasGateway: CategoriasGateway,
   ) {}
   async crearCategoriasMasivo(
     createCategoriasDto: CreateCategoriaDto[],
@@ -28,7 +30,6 @@ export class CategoriasService {
     const categoriasCreadas: Categoria[] = [];
     try {
       for (const dto of createCategoriasDto) {
-        // Usamos la propiedad 'nom_cate' que se espera recibir desde la carga masiva.
         const categoryName = dto.nom_cate;
         if (!categoryName) {
           throw new BadRequestException(
@@ -36,28 +37,34 @@ export class CategoriasService {
           );
         }
 
-        // Verificar si ya existe una categoría con el mismo nombre.
         const categoriaExistente = await queryRunner.manager.findOne(
           Categoria,
           {
             where: { nom_cate: categoryName },
           },
         );
+
         if (categoriaExistente) {
           throw new BadRequestException(
             `La categoría ${categoryName} ya está registrada`,
           );
         }
 
-        // Crear la categoría asignando el valor correcto a la propiedad de la entidad.
         const categoria = this.categoriasRepository.create({
           ...dto,
           nom_cate: categoryName,
         });
+
         const categoriaGuardada = await queryRunner.manager.save(categoria);
         categoriasCreadas.push(categoriaGuardada);
       }
+
       await queryRunner.commitTransaction();
+
+      // 📡 Emitimos el evento una vez que todas se han guardado correctamente
+      this.categoriasGateway.emitirActualizacionCategorias();
+      console.log("📡 Evento 'categorias-actualizadas' emitido (masivo)");
+
       return { categorias: categoriasCreadas, errors: [] };
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -79,6 +86,8 @@ export class CategoriasService {
     }
     const categoria = this.categoriasRepository.create(createCategoriaDto);
     const categoriaGuardada = await this.categoriasRepository.save(categoria);
+    this.categoriasGateway.emitirActualizacionCategorias();
+    console.log("📡 Evento 'categorias-actualizadas' emitido (creación)");
     return {
       message: 'Categoría creada correctamente',
       categoria: categoriaGuardada,
@@ -138,6 +147,8 @@ export class CategoriasService {
     Object.assign(categoriaEncontrada, updateCategoriaDto);
     const categoriaActualizada =
       await this.categoriasRepository.save(categoriaEncontrada);
+    this.categoriasGateway.emitirActualizacionCategorias();
+    console.log("📡 Evento 'categorias-actualizadas' emitido (actualizada)");
     return {
       message: 'Categoría actualizada correctamente',
       categoria: categoriaActualizada,
@@ -156,6 +167,8 @@ export class CategoriasService {
     }
     categoria.est_cate = 'Inactivo';
     const categoriaInactivada = await this.categoriasRepository.save(categoria);
+    this.categoriasGateway.emitirActualizacionCategorias();
+    console.log("📡 Evento 'categorias-actualizadas' emitido (inactivado)");
     return {
       message: 'Categoría inactivada correctamente',
       categoria: categoriaInactivada,
@@ -185,6 +198,8 @@ export class CategoriasService {
     }
 
     const categoriaActivada = await this.categoriasRepository.save(categoria);
+    this.categoriasGateway.emitirActualizacionCategorias();
+    console.log("📡 Evento 'categorias-actualizadas' emitido (activada)");
 
     return {
       message: 'Categoria activada correctamente',

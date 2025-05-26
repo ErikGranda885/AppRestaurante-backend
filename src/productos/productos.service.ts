@@ -12,6 +12,7 @@ import { Categoria } from 'src/categorias/categoria.entity';
 import { UpdateProductoDto } from './dto/update-producto.dto';
 import { Workbook } from 'exceljs';
 import * as PdfPrinter from 'pdfmake';
+import { ProductosGateway } from 'src/gateways/productos.gateway';
 @Injectable()
 export class ProductosService {
   constructor(
@@ -20,11 +21,8 @@ export class ProductosService {
     @InjectRepository(Categoria)
     private categoriaRepository: Repository<Categoria>,
     private dataSource: DataSource,
+    private productosGateway: ProductosGateway,
   ) {}
-
-  private excelSerialToJSDate(serial: number): Date {
-    return new Date(Math.round((serial - 25569) * 86400 * 1000));
-  }
 
   async crearProductosMasivo(
     createProductosDto: CreateProductoDto[],
@@ -73,7 +71,13 @@ export class ProductosService {
         const productoGuardado = await queryRunner.manager.save(producto);
         productosCreados.push(productoGuardado);
       }
+
       await queryRunner.commitTransaction();
+
+      // 📡 Emitir evento WebSocket después del commit exitoso
+      this.productosGateway.emitirActualizacionProductos();
+      console.log("📡 Evento 'productos-actualizados' emitido (masivo)");
+
       return { productos: productosCreados, errors: [] };
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -103,6 +107,7 @@ export class ProductosService {
   async listarProductos(): Promise<Producto[]> {
     return this.productosRepository.find();
   }
+
   async listarProducto(id: number): Promise<Producto> {
     const producto = await this.productosRepository.findOne({
       where: { id_prod: id },
@@ -114,6 +119,7 @@ export class ProductosService {
     }
     return producto;
   }
+
   async actualizarProducto(
     id: number,
     updateProductoDto: UpdateProductoDto,
@@ -137,6 +143,8 @@ export class ProductosService {
     // Actualizamos el producto con los nuevos valores
     Object.assign(producto, updateProductoDto);
     const productoActualizado = await this.productosRepository.save(producto);
+    this.productosGateway.emitirActualizacionProductos(); // 👈 evento en tiempo real
+    console.log('📡 Evento productos-actualizados emitido (actualización)');
 
     return {
       message: 'Producto actualizado correctamente',
@@ -170,6 +178,8 @@ export class ProductosService {
     });
 
     const productoGuardado = await this.productosRepository.save(producto);
+    this.productosGateway.emitirActualizacionProductos();
+    console.log('📡 Evento productos-actualizados emitido (creación)');
     return {
       message: 'Producto creado correctamente',
       producto: productoGuardado,
@@ -197,12 +207,14 @@ export class ProductosService {
     }
 
     const productoInactivado = await this.productosRepository.save(producto);
-
+    this.productosGateway.emitirActualizacionProductos(); // 👈 evento en tiempo real
+    console.log('📡 Evento productos-actualizados emitido (inactivado)');
     return {
       message: 'Producto inactivado correctamente',
       producto: productoInactivado,
     };
   }
+
   async activarProducto(
     id: number,
     updateProductoDto?: UpdateProductoDto,
@@ -218,7 +230,8 @@ export class ProductosService {
     }
 
     const productoActivado = await this.productosRepository.save(producto);
-
+    this.productosGateway.emitirActualizacionProductos(); // 👈 evento en tiempo real
+    console.log('📡 Evento productos-actualizados emitido (activado)');
     return {
       message: 'Producto activado correctamente',
       producto: productoActivado,
@@ -241,327 +254,6 @@ export class ProductosService {
 
     return result;
   }
-
-  /* async exportarReporteProductosConEquivalenciaExcel(
-    desde?: string,
-    hasta?: string,
-  ): Promise<Buffer> {
-    const ExcelJS = require('exceljs');
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Reporte Productos');
-
-    const azul = '305496';
-    const blanco = 'FFFFFF';
-    const grisMedio = 'D9D9D9';
-
-    let fila = 1;
-
-    // Título
-    worksheet.mergeCells(`A${fila}:G${fila}`);
-    const titulo = worksheet.getCell(`A${fila}`);
-    titulo.value = `REPORTE DE PRODUCTOS CON EQUIVALENCIAS`;
-    titulo.font = { size: 18, bold: true, color: { argb: azul } };
-    titulo.alignment = { horizontal: 'center', vertical: 'middle' };
-    fila += 2;
-
-    // Fechas
-    const desdeFmt = desde ? new Date(desde).toLocaleDateString('es-EC') : '-';
-    const hastaFmt = hasta ? new Date(hasta).toLocaleDateString('es-EC') : '-';
-
-    worksheet.getCell(`A${fila}`).value = `Desde: ${desdeFmt}`;
-    worksheet.getCell(`B${fila}`).value = `Hasta: ${hastaFmt}`;
-    worksheet.getCell(`A${fila}`).font = { italic: true };
-    worksheet.getCell(`B${fila}`).font = { italic: true };
-    fila += 2;
-
-    // Encabezado
-    worksheet.addRow([
-      'ID',
-      'Nombre',
-      'Tipo',
-      'Unidad base',
-      'Stock',
-      'Equivalente',
-      'Interpretación',
-    ]);
-    const encabezado = worksheet.getRow(fila);
-    encabezado.eachCell((cell) => {
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: azul },
-      };
-      cell.font = { bold: true, color: { argb: blanco } };
-      cell.alignment = { horizontal: 'center', vertical: 'middle' };
-      cell.border = {
-        top: { style: 'thin' },
-        bottom: { style: 'thin' },
-        left: { style: 'thin' },
-        right: { style: 'thin' },
-      };
-    });
-    fila++;
-
-    // ❄️ Congelar encabezado
-    worksheet.views = [
-      {
-        state: 'frozen',
-        ySplit: fila, // congela todo hasta el encabezado
-      },
-    ];
-
-    // Obtener datos
-    const productos = await this.productosRepository.find();
-    const equivalenciasQuery = this.dataSource
-      .getRepository('equivalencias')
-      .createQueryBuilder('equiv')
-      .leftJoinAndSelect('equiv.prod_equiv', 'producto');
-
-    if (desde && hasta) {
-      equivalenciasQuery.where('equiv.createdAt BETWEEN :desde AND :hasta', {
-        desde: new Date(desde),
-        hasta: new Date(hasta),
-      });
-    }
-
-    const equivalencias = await equivalenciasQuery.getMany();
-
-    let totalInsumos = 0;
-    let sumaStock = 0;
-
-    for (const producto of productos) {
-      const equiv = equivalencias.find(
-        (e) => e.prod_equiv.id_prod === producto.id_prod,
-      );
-
-      let interprete = '-';
-      if (producto.tip_prod === 'Insumo' && equiv) {
-        const cantidad = producto.stock_prod ?? 0;
-        const unidadBase = producto.und_prod;
-        const unidadEquiv = equiv.und_prod_equiv;
-        const cantEquiv = equiv.cant_equiv;
-
-        if (['g', 'ml'].includes(unidadEquiv)) {
-          const porcentaje = (cantidad / cantEquiv) * 100;
-          interprete = `${porcentaje.toFixed(1)}% de 1 ${unidadBase}`;
-        } else {
-          const enteros = Math.floor(cantidad / cantEquiv);
-          const resto = cantidad % cantEquiv;
-          interprete = `${enteros} ${unidadBase}${enteros !== 1 ? 's' : ''} + ${resto} ${unidadEquiv}`;
-        }
-      }
-
-      const row = worksheet.addRow([
-        producto.id_prod,
-        producto.nom_prod,
-        producto.tip_prod,
-        producto.und_prod,
-        producto.stock_prod,
-        equiv
-          ? `1 ${producto.und_prod} = ${equiv.cant_equiv} ${equiv.und_prod_equiv}`
-          : '-',
-        interprete,
-      ]);
-
-      row.eachCell((cell) => {
-        cell.alignment = { horizontal: 'center' };
-        cell.border = {
-          top: { style: 'thin' },
-          bottom: { style: 'thin' },
-          left: { style: 'thin' },
-          right: { style: 'thin' },
-        };
-      });
-
-      if (producto.tip_prod === 'Insumo') {
-        totalInsumos++;
-        sumaStock += producto.stock_prod ?? 0;
-      }
-
-      fila++;
-    }
-
-    // 🧾 Resumen en columna A
-    worksheet.addRow([]);
-    fila++;
-
-    worksheet.getCell(`A${fila}`).value = 'Resumen:';
-    worksheet.getCell(`A${fila}`).font = { bold: true };
-    fila++;
-
-    worksheet.getCell(`A${fila}`).value = 'Total insumos:';
-    worksheet.getCell(`B${fila}`).value = totalInsumos;
-    fila++;
-
-    worksheet.getCell(`A${fila}`).value = 'Stock total acumulado:';
-    worksheet.getCell(`B${fila}`).value = sumaStock;
-
-    // 📏 Ajustar anchos automáticamente
-    worksheet.columns.forEach((column) => {
-      let maxLength = 10;
-      column.eachCell({ includeEmpty: true }, (cell) => {
-        const value = cell.value;
-        const length = value ? value.toString().length : 0;
-        if (length > maxLength) maxLength = length;
-      });
-      column.width = maxLength + 2;
-    });
-
-    return Buffer.from(await workbook.xlsx.writeBuffer());
-  } */
-
-  /* async exportarReporteProductosInsumoExcel(
-    desde?: string,
-    hasta?: string,
-  ): Promise<Buffer> {
-    const ExcelJS = require('exceljs');
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Productos Insumo');
-
-    const azul = '305496';
-    const blanco = 'FFFFFF';
-
-    let fila = 1;
-
-    // Título
-    worksheet.mergeCells(`A${fila}:G${fila}`);
-    const titulo = worksheet.getCell(`A${fila}`);
-    titulo.value = `REPORTE DE PRODUCTOS INSUMO`;
-    titulo.font = { size: 18, bold: true, color: { argb: azul } };
-    titulo.alignment = { horizontal: 'center', vertical: 'middle' };
-    fila += 2;
-
-    // Fechas
-    const desdeFmt = desde ? new Date(desde).toLocaleDateString('es-EC') : '-';
-    const hastaFmt = hasta ? new Date(hasta).toLocaleDateString('es-EC') : '-';
-
-    worksheet.getCell(`A${fila}`).value = `Desde: ${desdeFmt}`;
-    worksheet.getCell(`B${fila}`).value = `Hasta: ${hastaFmt}`;
-    worksheet.getCell(`A${fila}`).font = { italic: true };
-    worksheet.getCell(`B${fila}`).font = { italic: true };
-    fila += 2;
-
-    // Encabezado
-    worksheet.addRow([
-      'ID',
-      'Nombre',
-      'Tipo',
-      'Unidad base',
-      'Stock',
-      'Equivalente',
-      'Interpretación',
-    ]);
-    const encabezado = worksheet.getRow(fila);
-    encabezado.eachCell((cell) => {
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: azul },
-      };
-      cell.font = { bold: true, color: { argb: blanco } };
-      cell.alignment = { horizontal: 'center', vertical: 'middle' };
-      cell.border = {
-        top: { style: 'thin' },
-        bottom: { style: 'thin' },
-        left: { style: 'thin' },
-        right: { style: 'thin' },
-      };
-    });
-    fila++;
-
-    worksheet.views = [{ state: 'frozen', ySplit: fila }];
-
-    // Obtener productos y equivalencias
-    const productos = await this.productosRepository.find();
-    const equivalencias = await this.dataSource
-      .getRepository('equivalencias')
-      .createQueryBuilder('equiv')
-      .leftJoinAndSelect('equiv.prod_equiv', 'producto')
-      .getMany();
-
-    // Filtrar insumos con equivalencia
-    const insumosConEquivalencia = productos
-      .filter((p) => p.tip_prod === 'Insumo')
-      .filter((p) =>
-        equivalencias.find((e) => e.prod_equiv.id_prod === p.id_prod),
-      );
-
-    // 🚫 Si no hay datos válidos, lanzar 404
-    if (insumosConEquivalencia.length === 0) {
-      throw new NotFoundException(
-        'No se encontraron insumos con equivalencias registradas.',
-      );
-    }
-
-    // Llenar datos
-    for (const producto of insumosConEquivalencia) {
-      const equiv = equivalencias.find(
-        (e) => e.prod_equiv.id_prod === producto.id_prod,
-      );
-
-      const cantidad = producto.stock_prod ?? 0;
-      const unidadBase = producto.und_prod;
-      const unidadEquiv = equiv!.und_prod_equiv;
-      const cantEquiv = equiv!.cant_equiv;
-
-      let interprete = '-';
-
-      if (['g', 'ml'].includes(unidadEquiv)) {
-        const porcentaje = (cantidad / cantEquiv) * 100;
-        interprete = `${porcentaje.toFixed(1)}% de 1 ${unidadBase}`;
-      } else {
-        const enteros = Math.floor(cantidad / cantEquiv);
-        const resto = cantidad % cantEquiv;
-        interprete = `${enteros} ${unidadBase}${enteros !== 1 ? 's' : ''} + ${resto} ${unidadEquiv}`;
-      }
-
-      const row = worksheet.addRow([
-        producto.id_prod,
-        producto.nom_prod,
-        producto.tip_prod,
-        unidadBase,
-        cantidad,
-        `1 ${unidadBase} = ${cantEquiv} ${unidadEquiv}`,
-        interprete,
-      ]);
-
-      row.eachCell((cell) => {
-        cell.alignment = { horizontal: 'center' };
-        cell.border = {
-          top: { style: 'thin' },
-          bottom: { style: 'thin' },
-          left: { style: 'thin' },
-          right: { style: 'thin' },
-        };
-      });
-
-      fila++;
-    }
-
-    // Resumen
-    worksheet.addRow([]);
-    fila++;
-
-    worksheet.getCell(`A${fila}`).value = 'Resumen:';
-    worksheet.getCell(`A${fila}`).font = { bold: true };
-    fila++;
-
-    worksheet.getCell(`A${fila}`).value = 'Total insumos con equivalencia:';
-    worksheet.getCell(`B${fila}`).value = insumosConEquivalencia.length;
-
-    // Ajuste automático de columnas
-    worksheet.columns.forEach((column) => {
-      let maxLength = 10;
-      column.eachCell({ includeEmpty: true }, (cell) => {
-        const value = cell.value;
-        const length = value ? value.toString().length : 0;
-        if (length > maxLength) maxLength = length;
-      });
-      column.width = maxLength + 2;
-    });
-
-    return Buffer.from(await workbook.xlsx.writeBuffer());
-  } */
 
   async exportarReporteProductosInsumoExcel(
     desde?: string,
