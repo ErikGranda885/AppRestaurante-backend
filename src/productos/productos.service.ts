@@ -228,11 +228,12 @@ export class ProductosService {
   async obtenerProductosPopulares(limit: number = 7): Promise<any[]> {
     const result = await this.productosRepository
       .createQueryBuilder('producto')
-      .leftJoin('producto.det_ventas', 'detalle') // ← esta es la relación correcta
+      .leftJoin('producto.det_ventas', 'detalle')
       .select('producto.id_prod', 'id')
       .addSelect('producto.nom_prod', 'name')
       .addSelect('producto.img_prod', 'img')
-      .addSelect('SUM(detalle.cant_dventa)', 'orders') // ← suma de cantidad vendida
+      .addSelect('SUM(detalle.cant_dventa)', 'orders')
+      .where('producto.tip_prod != :tipo', { tipo: 'Insumo' }) // ⬅️ Exclusión
       .groupBy('producto.id_prod')
       .orderBy('orders', 'DESC')
       .limit(limit)

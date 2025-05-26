@@ -158,6 +158,12 @@ export class InventarioService {
       relations: ['cate_prod'],
     });
 
+    const equivalencias = await this.dataSource
+      .getRepository('equivalencias')
+      .createQueryBuilder('equiv')
+      .leftJoinAndSelect('equiv.prod_equiv', 'producto')
+      .getMany();
+
     console.log(
       `✅ Se encontraron ${productos.length} productos para procesar.`,
     );
@@ -211,12 +217,50 @@ export class InventarioService {
       }
 
       producto.stock_prod = stockTotal;
+
+      // Solo para productos tipo "insumo" con equivalencia
+      let interpretacionStock: string | null = null;
+      if (producto.tip_prod === 'Insumo') {
+        const equiv = equivalencias.find(
+          (e) => e.prod_equiv.id_prod === producto.id_prod,
+        );
+
+        if (equiv && equiv.cant_equiv > 0) {
+          const unidadBase = producto.und_prod;
+          const unidadEquiv = equiv.und_prod_equiv;
+          const cantEquiv = equiv.cant_equiv;
+
+          if (stockTotal > 0) {
+            const cantidad = stockTotal / cantEquiv;
+            let enteros = Math.floor(cantidad);
+            const decimales = Number((cantidad - enteros).toFixed(2));
+            const unidadFracc = unidadEquiv;
+
+            const fraccionRedondeada = Math.round(decimales * cantEquiv);
+
+            if (fraccionRedondeada === cantEquiv) {
+              enteros += 1;
+              interpretacionStock = `${enteros} ${unidadBase}`;
+            } else if (enteros > 0 && fraccionRedondeada > 0) {
+              interpretacionStock = `${enteros} ${unidadBase} + ${fraccionRedondeada} ${unidadFracc}`;
+            } else if (enteros > 0) {
+              interpretacionStock = `${enteros} ${unidadBase}`;
+            } else {
+              interpretacionStock = `${fraccionRedondeada} ${unidadFracc}`;
+            }
+          } else {
+            interpretacionStock = 'Sin stock';
+          }
+        }
+      }
+
       await this.productoRepository.save(producto);
 
       productosConVencimiento.push({
         ...producto,
         fecha_vence_proxima: fechaFormateada,
         dias_restantes: diasRestantes,
+        interpretacion_stock: interpretacionStock,
       });
     }
 
@@ -290,14 +334,17 @@ export class InventarioService {
 
   async obtenerStockPorNombre(
     nombre: string,
-  ): Promise<{ stock?: number; suggestions?: string[] }> {
+  ): Promise<{
+    stock?: number;
+    interpretacion_stock?: string;
+    suggestions?: string[];
+  }> {
     const nombreClean = nombre.trim();
     if (!nombreClean) {
       throw new BadRequestException('Nombre de producto vacío');
     }
 
     const normalizado = this.normalizarTexto(nombreClean);
-
     const productos = await this.productoRepository.find();
 
     const producto = productos.find(
@@ -308,7 +355,45 @@ export class InventarioService {
       const actualizado = await this.sincronizarYObtenerProducto(
         producto.id_prod,
       );
-      return { stock: actualizado.stock_prod };
+
+      // Solo si es insumo, calcular interpretación
+      let interpretacion_stock: string | undefined = undefined;
+      if (actualizado.tip_prod === 'Insumo') {
+        const equivalencia = await this.dataSource
+          .getRepository('equivalencias')
+          .createQueryBuilder('e')
+          .where('e.prod_equiv = :id', { id: actualizado.id_prod })
+          .getOne();
+
+        if (equivalencia && equivalencia.cant_equiv > 0) {
+          const unidadBase = actualizado.und_prod;
+          const unidadEquiv = equivalencia.und_prod_equiv;
+          const cantEquiv = equivalencia.cant_equiv;
+
+          const cantidad = actualizado.stock_prod / cantEquiv;
+          let enteros = Math.floor(cantidad);
+          const decimales = Number((cantidad - enteros).toFixed(2));
+          const unidadFracc = unidadEquiv;
+
+          const fraccionRedondeada = Math.round(decimales * cantEquiv);
+
+          if (fraccionRedondeada === cantEquiv) {
+            enteros += 1;
+            interpretacion_stock = `${enteros} ${unidadBase}`;
+          } else if (enteros > 0 && fraccionRedondeada > 0) {
+            interpretacion_stock = `${enteros} ${unidadBase} + ${fraccionRedondeada} ${unidadFracc}`;
+          } else if (enteros > 0) {
+            interpretacion_stock = `${enteros} ${unidadBase}`;
+          } else {
+            interpretacion_stock = `${fraccionRedondeada} ${unidadFracc}`;
+          }
+        }
+      }
+
+      return {
+        stock: actualizado.stock_prod,
+        interpretacion_stock,
+      };
     }
 
     const sugerencias = productos
