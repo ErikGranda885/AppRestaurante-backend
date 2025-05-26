@@ -23,6 +23,7 @@ import {
   ILike,
 } from 'typeorm';
 import { Lote } from 'src/lotes/lote.entity';
+import { ProductosGateway } from 'src/gateways/productos.gateway';
 
 @Injectable()
 export class InventarioService {
@@ -32,6 +33,7 @@ export class InventarioService {
     @InjectRepository(Producto)
     private readonly productoRepository: Repository<Producto>,
     private dataSource: DataSource,
+    private readonly productosGateway: ProductosGateway,
   ) {}
 
   private normalizarTexto(texto: string): string {
@@ -110,6 +112,8 @@ export class InventarioService {
       await queryRunner.commitTransaction();
       // 🔄 Actualiza el stock total de productos
       await this.sincronizarYListarProductos();
+      // ✅ Emitir evento a los clientes
+      this.productosGateway.emitirActualizacionProductos();
       return lotesUsados;
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -183,9 +187,9 @@ export class InventarioService {
         },
       });
 
-      console.log(
+      /* console.log(
         `🧪 Producto: ${producto.nom_prod} - Lotes encontrados: ${lotes.length}`,
-      );
+      ); */
 
       const stockTotal = lotes.reduce(
         (acc, lote) => acc + Number(lote.cant_disp_lote),
@@ -204,16 +208,16 @@ export class InventarioService {
           diasRestantes = differenceInCalendarDays(fecha, hoy) + 1;
           fechaFormateada = format(fecha, 'dd/MM/yyyy');
 
-          console.log(
+          /* console.log(
             `📅 Producto: ${producto.nom_prod} - Fecha venc: ${fechaFormateada} - Días restantes: ${diasRestantes}`,
-          );
+          ); */
         } else {
-          console.warn(`⚠️ Fecha inválida para producto: ${producto.nom_prod}`);
+          /* console.warn(`⚠️ Fecha inválida para producto: ${producto.nom_prod}`); */
         }
       } else {
-        console.warn(
+        /* console.warn(
           `❌ Producto: ${producto.nom_prod} no tiene lotes válidos.`,
-        );
+        ); */
       }
 
       producto.stock_prod = stockTotal;
@@ -263,10 +267,10 @@ export class InventarioService {
         interpretacion_stock: interpretacionStock,
       });
     }
-
     console.log(
       `✅ Total productos procesados con caducidad: ${productosConVencimiento.length}`,
     );
+
     return productosConVencimiento;
   }
 
@@ -332,9 +336,7 @@ export class InventarioService {
       .slice(0, limit);
   }
 
-  async obtenerStockPorNombre(
-    nombre: string,
-  ): Promise<{
+  async obtenerStockPorNombre(nombre: string): Promise<{
     stock?: number;
     interpretacion_stock?: string;
     suggestions?: string[];

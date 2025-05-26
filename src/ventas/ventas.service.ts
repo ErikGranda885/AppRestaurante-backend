@@ -15,6 +15,7 @@ import { format, getWeek, getYear } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Buffer } from 'buffer';
 import * as PdfPrinter from 'pdfmake';
+import { VentasGateway } from 'src/gateways/ventas.gateway';
 @Injectable()
 export class VentasService {
   constructor(
@@ -26,6 +27,7 @@ export class VentasService {
     private detVentaRepository: Repository<Det_Venta>,
     private readonly cierreDiaService: CierreDiaService,
     private dataSource: DataSource,
+    private ventasGateway: VentasGateway,
   ) {}
 
   // Crea una nueva venta
@@ -101,6 +103,7 @@ export class VentasService {
     }
 
     const ventaGuardada = await this.ventaRepository.save(venta);
+    this.ventasGateway.emitirActualizacionVentas();
 
     // ✅ ACTUALIZAR RESUMEN DEL CIERRE
     await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fechaVenta);
@@ -186,6 +189,8 @@ export class VentasService {
 
     Object.assign(venta, updateVentaDto);
     const ventaActualizada = await this.ventaRepository.save(venta);
+    this.ventasGateway.emitirActualizacionVentas();
+
     return {
       message: 'Venta actualizada exitosamente',
       venta: ventaActualizada,
@@ -714,6 +719,4 @@ export class VentasService {
       pdfDoc.end();
     });
   }
-
-  
 }

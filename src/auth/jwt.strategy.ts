@@ -23,7 +23,7 @@ export class JwtEstrategia extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
-    console.log('🧩 payload recibido en validate:', payload);
+    /* console.log('🧩 payload recibido en validate:', payload); */
 
     const usuario = await this.usuariosService.listarUsuario(payload.id);
 

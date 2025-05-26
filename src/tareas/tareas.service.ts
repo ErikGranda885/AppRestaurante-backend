@@ -25,7 +25,7 @@ export class TareasService implements OnModuleInit {
     const day = String(fecha.getDate()).padStart(2, '0');
     const fechaFinal = `${year}-${month}-${day}`;
 
-    console.log(`📅 Fecha local generada: ${fechaFinal}`);
+    /* console.log(`📅 Fecha local generada: ${fechaFinal}`); */
     this.logger.log(`📅 Fecha local generada: ${fechaFinal}`);
 
     return fechaFinal;
