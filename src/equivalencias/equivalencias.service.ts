@@ -4,18 +4,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Equivalencia } from './equivalencia.entity';
 import { CreateEquivalenciaDto } from './dto/create-equivalencia.dto';
 import { UpdateEquivalenciaDto } from './dto/update-equivalencia.dto';
-import { Transformacion } from 'src/transformaciones/transformacion.entity';
+import { EquivalenciasGateway } from 'src/gateways/equivalencias.gateway';
 
 @Injectable()
 export class EquivalenciaService {
   constructor(
     @InjectRepository(Equivalencia)
     private equivalenciaRepository: Repository<Equivalencia>,
-    private dataSource: DataSource,
+    private readonly equivalenciasGateway: EquivalenciasGateway,
   ) {}
 
   // Crear equivalencia
@@ -47,6 +47,7 @@ export class EquivalenciaService {
     const equivalenciaGuardada =
       await this.equivalenciaRepository.save(equivalencia);
 
+    this.equivalenciasGateway.emitirActualizacionEquivalencias();
     return {
       message: 'Equivalencia creada correctamente',
       equivalencia: equivalenciaGuardada,
@@ -108,6 +109,7 @@ export class EquivalenciaService {
     Object.assign(equivalencia, updateDto);
     const equivalenciaActualizada =
       await this.equivalenciaRepository.save(equivalencia);
+    this.equivalenciasGateway.emitirActualizacionEquivalencias();
 
     return {
       message: 'Equivalencia actualizada correctamente',
@@ -118,9 +120,9 @@ export class EquivalenciaService {
   // ✅ Eliminar equivalencia sin validación
   async eliminarEquivalencia(id: number): Promise<{ message: string }> {
     const equivalencia = await this.listarEquivalencia(id);
-
     await this.equivalenciaRepository.remove(equivalencia);
-
+    // 🔁 Emitir evento de actualización por WebSocket
+    this.equivalenciasGateway.emitirActualizacionEquivalencias();
     return { message: 'Equivalencia eliminada correctamente' };
   }
 }
