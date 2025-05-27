@@ -10,12 +10,14 @@ import { CreateProveedorDto } from './dto/create-proveedor.dto';
 import { UpdateProveedorDto } from './dto/update-proveedor.dto';
 import { Workbook } from 'exceljs';
 import * as PdfPrinter from 'pdfmake';
+import { ProveedoresGateway } from 'src/gateways/proveedores.gateway';
 
 @Injectable()
 export class ProveedoresService {
   constructor(
     @InjectRepository(Proveedor)
     private readonly repo: Repository<Proveedor>,
+    private readonly proveedoresGateway: ProveedoresGateway,
   ) {}
 
   /** Crea un nuevo proveedor */
@@ -29,11 +31,17 @@ export class ProveedoresService {
         `El email ${dto.email_prov} ya está registrado`,
       );
     }
+
     const prov = this.repo.create({
       ...dto,
       est_prov: dto.est_prov ?? 'Activo',
     });
-    return this.repo.save(prov);
+
+    const provGuardado = await this.repo.save(prov);
+
+    this.proveedoresGateway.emitirActualizacionProveedores();
+
+    return provGuardado;
   }
 
   /** Lista todos los proveedores */
@@ -57,7 +65,12 @@ export class ProveedoresService {
   ): Promise<Proveedor> {
     const prov = await this.listarProveedor(id);
     Object.assign(prov, dto);
-    return this.repo.save(prov);
+
+    const actualizado = await this.repo.save(prov);
+
+    this.proveedoresGateway.emitirActualizacionProveedores();
+
+    return actualizado;
   }
 
   /** Elimina un proveedor por ID */
@@ -66,6 +79,9 @@ export class ProveedoresService {
     if (res.affected === 0) {
       throw new NotFoundException(`Proveedor con ID ${id} no encontrado`);
     }
+
+    // 🔴 Emitir actualización por WebSocket
+    this.proveedoresGateway.emitirActualizacionProveedores();
   }
 
   /** Marca un proveedor como inactivo */
@@ -73,6 +89,8 @@ export class ProveedoresService {
     const prov = await this.listarProveedor(id);
     prov.est_prov = 'Inactivo';
     await this.repo.save(prov);
+
+    this.proveedoresGateway.emitirActualizacionProveedores();
   }
 
   /** Marca un proveedor como activo */
@@ -80,6 +98,8 @@ export class ProveedoresService {
     const prov = await this.listarProveedor(id);
     prov.est_prov = 'Activo';
     await this.repo.save(prov);
+
+    this.proveedoresGateway.emitirActualizacionProveedores();
   }
 
   async crearProveedoresMasivo(data: CreateProveedorDto[]) {
@@ -90,6 +110,10 @@ export class ProveedoresService {
       }),
     );
     const guardados = await this.repo.save(proveedores);
+
+    // 🔴 Emitir evento WebSocket
+    this.proveedoresGateway.emitirActualizacionProveedores();
+
     return {
       message: 'Proveedores creados exitosamente',
       proveedores: guardados,
