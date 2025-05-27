@@ -13,12 +13,14 @@ import { CierreDiaService } from 'src/cierre_dia/cierre_dia.service';
 import { format } from 'date-fns';
 import { Workbook } from 'exceljs';
 import * as PdfPrinter from 'pdfmake';
+import { ComprasGateway } from 'src/gateways/compras.gateway';
 @Injectable()
 export class ComprasService {
   constructor(
     @InjectRepository(Compras)
     private readonly comprasRepository: Repository<Compras>,
     private readonly cierreDiaService: CierreDiaService,
+    private readonly comprasGateway: ComprasGateway,
   ) {}
 
   // Obtener todas las compras
@@ -88,7 +90,8 @@ export class ComprasService {
         }
         await this.cierreDiaService.actualizarResumenDelDia(fecha);
       }
-
+      // 🔊 Notificar al frontend que hay nuevas compras
+      this.comprasGateway.emitirActualizacionCompras();
       return compraGuardada;
     } catch (error) {
       console.error('Error al crear compra:', error);
@@ -117,7 +120,12 @@ export class ComprasService {
     }
 
     const compraActualizada = Object.assign(compra, updateCompraDto);
-    return await this.comprasRepository.save(compraActualizada);
+    const resultado = await this.comprasRepository.save(compraActualizada);
+
+    // 🔊 Emitir evento para actualización en tiempo real
+    this.comprasGateway.emitirActualizacionCompras();
+
+    return resultado;
   }
 
   // Eliminar una compra
@@ -139,6 +147,9 @@ export class ComprasService {
     if (result.affected === 0) {
       throw new NotFoundException(`Compra con id ${id} no encontrada`);
     }
+
+    // 🔊 Emitir evento para notificar eliminación
+    this.comprasGateway.emitirActualizacionCompras();
   }
 
   // Registrar pago de una compra
@@ -204,6 +215,9 @@ export class ComprasService {
         `Error al procesar la fecha de la compra: ${error.message}`,
       );
     }
+
+    // 🔊 Emitir evento WebSocket después del registro de pago
+    this.comprasGateway.emitirActualizacionCompras();
 
     return compraActualizada;
   }

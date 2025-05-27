@@ -12,19 +12,20 @@ import { Gasto } from './gasto.entity';
 import { CierreDiaService } from 'src/cierre_dia/cierre_dia.service';
 import { Workbook } from 'exceljs';
 import * as PdfPrinter from 'pdfmake';
+import { GastosGateway } from 'src/gateways/gastos.gateway';
 @Injectable()
 export class GastosService {
   constructor(
     @InjectRepository(Gasto)
     private readonly gastoRepository: Repository<Gasto>,
     private readonly cierreDiaService: CierreDiaService,
+    private readonly gastosGateway: GastosGateway,
   ) {}
 
   async crearGasto(createGastoDto: CreateGastoDto): Promise<Gasto> {
     const fechaGasto = createGastoDto.fech_gas
       ? new Date(createGastoDto.fech_gas)
       : new Date();
-
     const fecha = fechaGasto.toISOString().split('T')[0];
 
     // 🛡️ Validar si el día ya está cerrado
@@ -33,6 +34,9 @@ export class GastosService {
         `No se pueden registrar gastos en un día cerrado (${fecha}).`,
       );
     }
+
+    // Asegurar que el cierre exista antes de registrar el gasto
+    await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fecha);
 
     const gasto = this.gastoRepository.create({
       desc_gas: createGastoDto.desc_gas,
@@ -43,10 +47,10 @@ export class GastosService {
 
     const gastoGuardado = await this.gastoRepository.save(gasto);
 
-    const yaExiste = await this.cierreDiaService.existeCierrePorFecha(fecha);
-    if (!yaExiste) {
-      await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fecha);
-    }
+    // Emitir evento a través del gateway
+    this.gastosGateway.emitirActualizacionGastos();
+
+    // Actualizar resumen económico del día
     await this.cierreDiaService.actualizarResumenDelDia(fecha);
 
     return gastoGuardado;
@@ -104,6 +108,7 @@ export class GastosService {
     );
 
     const actualizado = await this.gastoRepository.save(gastoActualizado);
+    this.gastosGateway.emitirActualizacionGastos();
 
     const yaExiste = await this.cierreDiaService.existeCierrePorFecha(fecha);
     if (!yaExiste) {
@@ -129,12 +134,18 @@ export class GastosService {
         `No se puede eliminar un gasto de un día cerrado (${fecha}).`,
       );
     }
+
     await this.gastoRepository.remove(gasto);
+
     const yaExiste = await this.cierreDiaService.existeCierrePorFecha(fecha);
     if (!yaExiste) {
       await this.cierreDiaService.verificarOCrearCierreSiNoExiste(fecha);
     }
+
     await this.cierreDiaService.actualizarResumenDelDia(fecha);
+
+    // 🟢 Emitir actualización por WebSocket
+    this.gastosGateway.emitirActualizacionGastos();
   }
 
   /* Metodo para dashboard */
