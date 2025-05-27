@@ -25,15 +25,15 @@ export class CreateLoteDto {
 
   @IsOptional()
   @IsDate()
-  fecha_venc_lote?: Date| null;
+  fecha_venc_lote?: Date | null;
 
   @IsNotEmpty()
   @IsEnum(['vigente', 'por_vencer', 'vencido'])
   esta_lote: 'vigente' | 'por_vencer' | 'vencido';
 
   @IsNotEmpty()
-  @IsEnum(['compra', 'transformacion'])
-  orig_lote: 'compra' | 'transformacion';
+  @IsEnum(['compra', 'transformacion', 'inicial'])
+  orig_lote: 'compra' | 'transformacion' | 'inicial';
 
   @IsNotEmpty()
   @IsNumber()

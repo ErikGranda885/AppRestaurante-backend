@@ -13,6 +13,9 @@ import { UpdateProductoDto } from './dto/update-producto.dto';
 import { Workbook } from 'exceljs';
 import * as PdfPrinter from 'pdfmake';
 import { ProductosGateway } from 'src/gateways/productos.gateway';
+import { Lote } from 'src/lotes/lote.entity';
+import { LotesService } from 'src/lotes/lotes.service';
+import { LotesModule } from 'src/lotes/lotes.module';
 @Injectable()
 export class ProductosService {
   constructor(
@@ -22,6 +25,9 @@ export class ProductosService {
     private categoriaRepository: Repository<Categoria>,
     private dataSource: DataSource,
     private productosGateway: ProductosGateway,
+    private readonly lotesService: LotesService,
+    @InjectRepository(Lote)
+    private lotesRepository: Repository<Lote>,
   ) {}
 
   async crearProductosMasivo(
@@ -34,7 +40,14 @@ export class ProductosService {
     const productosCreados: Producto[] = [];
     try {
       for (const dto of createProductosDto) {
-        const { cate_prod, ...productData } = dto;
+        const {
+          cate_prod,
+          stock_prod,
+          prec_vent_prod,
+          fecha_venc_lote,
+          ...productData
+        } = dto;
+
         const cateValue = String(cate_prod);
 
         const productoExistente = await queryRunner.manager.findOne(Producto, {
@@ -65,16 +78,32 @@ export class ProductosService {
 
         const producto = this.productosRepository.create({
           ...productData,
+          prec_vent_prod: prec_vent_prod ?? 0,
           cate_prod: categoria,
         });
 
         const productoGuardado = await queryRunner.manager.save(producto);
         productosCreados.push(productoGuardado);
+
+        const stock = Number(stock_prod);
+        if (!isNaN(stock) && stock > 0) {
+          const lote = this.lotesRepository.create({
+            prod_lote: productoGuardado,
+            cant_tot_lote: stock,
+            cant_disp_lote: stock,
+            cant_usad_lote: 0,
+            fecha_venc_lote: fecha_venc_lote ? new Date(fecha_venc_lote) : null,
+            esta_lote: 'vigente',
+            orig_lote: 'inicial',
+            id_origen: 0,
+          });
+
+          await queryRunner.manager.save(lote); // Usar el mismo transaction manager
+        }
       }
 
       await queryRunner.commitTransaction();
 
-      // 📡 Emitir evento WebSocket después del commit exitoso
       this.productosGateway.emitirActualizacionProductos();
       console.log("📡 Evento 'productos-actualizados' emitido (masivo)");
 
@@ -748,7 +777,7 @@ export class ProductosService {
     });
   }
 
-  async exportarReporteProductosDirectosTransformadosExcel(
+  /* async exportarReporteProductosDirectosTransformadosExcel(
     desde?: string,
     hasta?: string,
   ): Promise<Buffer> {
@@ -943,9 +972,174 @@ export class ProductosService {
     });
 
     return Buffer.from(await workbook.xlsx.writeBuffer());
+  } */
+
+  async exportarReporteProductosDirectosTransformadosExcel(
+    desde?: string,
+    hasta?: string,
+  ): Promise<Buffer> {
+    const ExcelJS = require('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Directos y Transformados');
+
+    const azul = '305496';
+    const blanco = 'FFFFFF';
+    let fila = 1;
+
+    worksheet.mergeCells(`A${fila}:H${fila}`);
+    const titulo = worksheet.getCell(`A${fila}`);
+    titulo.value = `REPORTE DE PRODUCTOS DIRECTOS Y TRANSFORMADOS`;
+    titulo.font = { size: 18, bold: true, color: { argb: azul } };
+    titulo.alignment = { horizontal: 'center', vertical: 'middle' };
+    fila += 2;
+
+    const desdeDate = desde ? new Date(`${desde}T00:00:00`) : new Date();
+    const hastaDate = hasta ? new Date(`${hasta}T23:59:59`) : new Date();
+
+    worksheet.getCell(`A${fila}`).value =
+      `Desde: ${desdeDate.toLocaleDateString('es-EC')}`;
+    worksheet.getCell(`B${fila}`).value =
+      `Hasta: ${hastaDate.toLocaleDateString('es-EC')}`;
+    worksheet.getCell(`A${fila}`).font = { italic: true };
+    worksheet.getCell(`B${fila}`).font = { italic: true };
+    fila += 2;
+
+    const fechas: Date[] = [];
+    for (
+      let d = new Date(desdeDate);
+      d <= hastaDate;
+      d.setDate(d.getDate() + 1)
+    ) {
+      fechas.push(new Date(d));
+    }
+
+    const headers = [
+      'ID',
+      'Nombre',
+      'Tipo',
+      'Unidad base',
+      'Stock Inicial',
+      ...fechas.map((f) => f.toLocaleDateString('es-EC')),
+    ];
+    worksheet.addRow(headers);
+    const encabezado = worksheet.getRow(fila);
+    encabezado.eachCell((cell) => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: azul },
+      };
+      cell.font = { bold: true, color: { argb: blanco } };
+      cell.alignment = { horizontal: 'center' };
+      cell.border = {
+        top: { style: 'thin' },
+        bottom: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
+      };
+    });
+    fila++;
+
+    const productos = await this.productosRepository.find();
+    const productosFiltrados = productos.filter((p) =>
+      ['Directo', 'Transformado'].includes(p.tip_prod),
+    );
+
+    const lotes = await this.dataSource
+      .getRepository('lotes')
+      .createQueryBuilder('l')
+      .leftJoinAndSelect('l.prod_lote', 'producto')
+      .where('DATE(l.crea_en_lote) <= :hasta', {
+        hasta: hastaDate.toISOString().split('T')[0],
+      })
+      .getMany();
+
+    const ventas = await this.dataSource
+      .getRepository('dets_ventas')
+      .createQueryBuilder('dv')
+      .leftJoinAndSelect('dv.vent_dventa', 'venta')
+      .leftJoinAndSelect('dv.prod_dventa', 'producto')
+      .where('DATE(venta.fech_vent) BETWEEN :desde AND :hasta', {
+        desde: desdeDate.toISOString().split('T')[0],
+        hasta: hastaDate.toISOString().split('T')[0],
+      })
+      .getMany();
+
+    function esMismaFecha(d1: Date, d2: Date): boolean {
+      return (
+        d1.getFullYear() === d2.getFullYear() &&
+        d1.getMonth() === d2.getMonth() &&
+        d1.getDate() === d2.getDate()
+      );
+    }
+
+    for (const producto of productosFiltrados) {
+      const loteInicial = lotes.find(
+        (l) =>
+          l.prod_lote?.id_prod === producto.id_prod &&
+          l.orig_lote === 'inicial',
+      );
+      const stockInicial = loteInicial ? Number(loteInicial.cant_tot_lote) : 0;
+      let stockAcumulado = stockInicial;
+
+      const filaValores = [
+        producto.id_prod,
+        producto.nom_prod,
+        producto.tip_prod,
+        producto.und_prod,
+        stockInicial,
+      ];
+
+      for (const fecha of fechas) {
+        const entradas = lotes
+          .filter(
+            (l) =>
+              l.prod_lote?.id_prod === producto.id_prod &&
+              esMismaFecha(new Date(l.crea_en_lote), fecha) &&
+              l.orig_lote !== 'inicial', // 🔒 evitar sumar lote inicial
+          )
+          .reduce((sum, l) => sum + Number(l.cant_tot_lote), 0);
+
+        const salidas = ventas
+          .filter(
+            (v) =>
+              v.prod_dventa?.id_prod === producto.id_prod &&
+              esMismaFecha(new Date(v.vent_dventa.fech_vent), fecha),
+          )
+          .reduce((sum, v) => sum + Number(v.cant_dventa), 0);
+
+        stockAcumulado += entradas - salidas;
+        filaValores.push(stockAcumulado);
+      }
+
+      const row = worksheet.addRow(filaValores);
+      row.eachCell((cell) => {
+        cell.alignment = { horizontal: 'center' };
+        cell.border = {
+          top: { style: 'thin' },
+          bottom: { style: 'thin' },
+          left: { style: 'thin' },
+          right: { style: 'thin' },
+        };
+      });
+
+      fila++;
+    }
+
+    worksheet.columns.forEach((column) => {
+      let maxLength = 10;
+      column.eachCell({ includeEmpty: true }, (cell) => {
+        const value = cell.value;
+        const length = value ? value.toString().length : 0;
+        if (length > maxLength) maxLength = length;
+      });
+      column.width = maxLength + 2;
+    });
+
+    return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 
-  async exportarReporteProductosDirectosTransformadosPDF(
+  /* async exportarReporteProductosDirectosTransformadosPDF(
     desde?: string,
     hasta?: string,
   ): Promise<Buffer> {
@@ -1132,6 +1326,180 @@ export class ProductosService {
     };
 
     return new Promise((resolve, reject) => {
+      const pdfDoc = printer.createPdfKitDocument(docDefinition);
+      const chunks: Uint8Array[] = [];
+      pdfDoc.on('data', (chunk) => chunks.push(chunk));
+      pdfDoc.on('end', () => resolve(Buffer.concat(chunks)));
+      pdfDoc.end();
+    });
+  } */
+  async exportarReporteProductosDirectosTransformadosPDF(
+    desde?: string,
+    hasta?: string,
+  ): Promise<Buffer> {
+    const desdeDate = desde ? new Date(`${desde}T00:00:00`) : new Date();
+    const hastaDate = hasta ? new Date(`${hasta}T23:59:59`) : new Date();
+
+    const productos = await this.productosRepository.find();
+    const productosFiltrados = productos.filter((p) =>
+      ['Directo', 'Transformado'].includes(p.tip_prod),
+    );
+
+    const lotes = await this.dataSource
+      .getRepository('lotes')
+      .createQueryBuilder('l')
+      .leftJoinAndSelect('l.prod_lote', 'producto')
+      .where('DATE(l.crea_en_lote) <= :hasta', {
+        hasta: hastaDate.toISOString().split('T')[0],
+      })
+      .getMany();
+
+    const ventas = await this.dataSource
+      .getRepository('dets_ventas')
+      .createQueryBuilder('dv')
+      .leftJoinAndSelect('dv.vent_dventa', 'venta')
+      .leftJoinAndSelect('dv.prod_dventa', 'producto')
+      .where('DATE(venta.fech_vent) BETWEEN :desde AND :hasta', {
+        desde: desdeDate.toISOString().split('T')[0],
+        hasta: hastaDate.toISOString().split('T')[0],
+      })
+      .getMany();
+
+    const fechas: Date[] = [];
+    for (
+      let d = new Date(desdeDate);
+      d <= hastaDate;
+      d.setDate(d.getDate() + 1)
+    ) {
+      fechas.push(new Date(d));
+    }
+
+    function esMismaFecha(d1: Date, d2: Date): boolean {
+      return (
+        d1.getFullYear() === d2.getFullYear() &&
+        d1.getMonth() === d2.getMonth() &&
+        d1.getDate() === d2.getDate()
+      );
+    }
+
+    const body: any[][] = [
+      [
+        { text: 'ID', bold: true },
+        { text: 'Nombre', bold: true },
+        { text: 'Tipo', bold: true },
+        { text: 'Unidad', bold: true },
+        { text: 'Stock Inicial', bold: true },
+        ...fechas.map((f) => ({
+          text: f.toLocaleDateString('es-EC'),
+          bold: true,
+        })),
+      ],
+    ];
+
+    for (const producto of productosFiltrados) {
+      // Obtener lote inicial específico
+      const loteInicial = lotes.find(
+        (l) =>
+          l.prod_lote?.id_prod === producto.id_prod &&
+          l.orig_lote === 'inicial',
+      );
+      const stockInicial = loteInicial?.cant_tot_lote ?? 0;
+
+      let stockAcumulado = stockInicial;
+
+      const fila = [
+        producto.id_prod,
+        producto.nom_prod,
+        producto.tip_prod,
+        producto.und_prod,
+        stockInicial,
+      ];
+
+      for (const fecha of fechas) {
+        // Entradas del día (excluyendo el lote inicial)
+        const entradas = lotes
+          .filter(
+            (l) =>
+              l.prod_lote?.id_prod === producto.id_prod &&
+              esMismaFecha(new Date(l.crea_en_lote), fecha) &&
+              l.orig_lote !== 'inicial', // 🚫 evitar duplicar el stock inicial
+          )
+          .reduce((sum, l) => sum + Number(l.cant_tot_lote), 0);
+
+        // Salidas del día
+        const salidas = ventas
+          .filter(
+            (v) =>
+              v.prod_dventa?.id_prod === producto.id_prod &&
+              esMismaFecha(new Date(v.vent_dventa.fech_vent), fecha),
+          )
+          .reduce((sum, v) => sum + Number(v.cant_dventa), 0);
+
+        stockAcumulado += entradas - salidas;
+        fila.push(stockAcumulado);
+      }
+
+      body.push(fila);
+    }
+
+    const fonts = {
+      Roboto: {
+        normal: 'Helvetica',
+        bold: 'Helvetica-Bold',
+        italics: 'Helvetica-Oblique',
+        bolditalics: 'Helvetica-BoldOblique',
+      },
+    };
+
+    const printer = new PdfPrinter(fonts);
+    const docDefinition = {
+      pageOrientation: 'landscape',
+      content: [
+        {
+          text: 'REPORTE DE PRODUCTOS DIRECTOS Y TRANSFORMADOS',
+          style: 'header',
+        },
+        {
+          columns: [
+            {
+              text: `Desde: ${desdeDate.toLocaleDateString('es-EC')}`,
+              style: 'subheader',
+            },
+            {
+              text: `Hasta: ${hastaDate.toLocaleDateString('es-EC')}`,
+              style: 'subheader',
+              alignment: 'right',
+            },
+          ],
+        },
+        '\n',
+        {
+          table: {
+            headerRows: 1,
+            widths: Array(body[0].length).fill('*'),
+            body,
+          },
+          layout: 'lightHorizontalLines',
+        },
+      ],
+      styles: {
+        header: {
+          fontSize: 18,
+          bold: true,
+          alignment: 'center',
+          margin: [0, 0, 0, 10],
+        },
+        subheader: {
+          fontSize: 10,
+          italics: true,
+        },
+      },
+      defaultStyle: {
+        font: 'Roboto',
+      },
+    };
+
+    return new Promise((resolve) => {
       const pdfDoc = printer.createPdfKitDocument(docDefinition);
       const chunks: Uint8Array[] = [];
       pdfDoc.on('data', (chunk) => chunks.push(chunk));

@@ -274,7 +274,7 @@ export class ProductosController {
     try {
       const categorias = await this.categoriasService.categoriasActivas();
 
-      // Define listas estáticas para tipos y unidades (puedes cargarlas desde base si lo prefieres)
+      // Define listas estáticas para tipos y unidades
       const tipos = ['Insumo', 'Transformado', 'Directo', 'Combo'];
       const unidades = ['qq', 'kg', 'und', 'lb', 'g'];
 
@@ -303,12 +303,23 @@ export class ProductosController {
       unidadesSheet.state = 'veryHidden';
 
       // ---------------- Hoja Principal: Productos ----------------
-      mainSheet.addRow(['cate_prod', 'nom_prod', 'tip_prod', 'und_prod']);
+      mainSheet.addRow([
+        'cate_prod',
+        'nom_prod',
+        'tip_prod',
+        'und_prod',
+        'stock_inicial',
+        'precio_venta',
+        'fecha_vencimiento',
+      ]);
       mainSheet.addRow([
         'Ej: Bebidas frías',
         'Coca-Cola lata 355ml',
         'Insumo',
         'und',
+        'Ej: 50',
+        'Ej: 0.5',
+        'Ej: 2025-08-01',
       ]);
 
       for (let i = 3; i <= 102; i++) {
@@ -338,6 +349,36 @@ export class ProductosController {
           showErrorMessage: true,
           error: 'Seleccione una unidad válida.',
         };
+
+        // Validación: Stock inicial (columna E)
+        mainSheet.getCell(`E${i}`).dataValidation = {
+          type: 'decimal',
+          operator: 'greaterThanOrEqual',
+          formulae: [0],
+          allowBlank: true,
+          showErrorMessage: true,
+          error: 'Ingrese un número válido de stock (opcional).',
+        };
+
+        // Validación: Precio venta (columna F)
+        mainSheet.getCell(`F${i}`).dataValidation = {
+          type: 'decimal',
+          operator: 'greaterThanOrEqual',
+          formulae: [0],
+          allowBlank: true,
+          showErrorMessage: true,
+          error: 'Ingrese un precio válido (opcional).',
+        };
+
+        // Validación: Fecha vencimiento (columna G)
+        mainSheet.getCell(`G${i}`).dataValidation = {
+          type: 'date',
+          allowBlank: true,
+          formulae: [new Date(1900, 0, 1), new Date(9999, 11, 31)],
+          showErrorMessage: true,
+          error:
+            'Ingrese una fecha válida entre 1900 y 9999 (formato: YYYY-MM-DD).',
+        };
       }
 
       // Enviar archivo
@@ -363,6 +404,7 @@ export class ProductosController {
   async crearBulk(@Body() createProductosDto: CreateProductoDto[]) {
     return this.productosService.crearProductosMasivo(createProductosDto);
   }
+
   @Get(':id')
   async listarProducto(
     @Param('id', ParseIntPipe) id: number,

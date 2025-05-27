@@ -1,4 +1,10 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import {
+  IsDateString,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 
 export class CreateProductoDto {
   @IsOptional()
@@ -40,4 +46,9 @@ export class CreateProductoDto {
   @IsOptional()
   @IsNumber()
   iva_prod?: number;
+
+  // 👇 Este se usará para el lote
+  @IsOptional()
+  @IsDateString()
+  fecha_venc_lote?: string;
 }

@@ -113,7 +113,7 @@ export class LotesService {
     cant_usad_lote: number;
     fecha_vencimiento?: Date | null; // ✅ permitimos null
     estado: 'vigente' | 'por_vencer' | 'vencido';
-    origen: 'compra' | 'transformacion';
+    origen: 'compra' | 'transformacion' | 'inicial';
     id_origen: number;
   }) {
     return this.crearLote({

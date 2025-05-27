@@ -39,7 +39,7 @@ export class Lote {
   esta_lote: 'vigente' | 'por_vencer' | 'vencido';
 
   @Column({ type: 'varchar', length: 30 })
-  orig_lote: 'compra' | 'transformacion';
+  orig_lote: 'compra' | 'transformacion' | 'inicial';
 
   @Column({ type: 'int' })
   id_origen: number;
