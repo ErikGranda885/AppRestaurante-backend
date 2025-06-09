@@ -9,18 +9,21 @@ import {
   HttpCode,
   HttpStatus,
   Res,
+  BadRequestException,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { UsuariosService } from '../usuarios/usuarios.service';
 import { LoginUsuarioDto } from '../usuarios/dto/login-usuario.dto';
 import { JwtService } from '@nestjs/jwt';
-
+import { MailService } from 'src/mail/mail.service';
+import * as CryptoJS from 'crypto-js';
 @Controller('auth')
 export class AuthController {
   constructor(
     private readonly usuariosService: UsuariosService,
     private readonly jwtService: JwtService,
+    private readonly mailService: MailService,
   ) {}
 
   // ✅ Devuelve usuario actual desde cookie (JWT guard + validate)
@@ -89,6 +92,47 @@ export class AuthController {
     });
 
     return { message: 'Sesión cerrada correctamente' };
+  }
+
+  @Post('solicitar-restablecimiento')
+  async solicitarRestablecimiento(@Body('email') email: string) {
+    const user = await this.usuariosService.buscarPorEmail(email); // crea este método si no existe
+
+    if (!user) {
+      return { error: 'Correo no registrado' };
+    }
+
+    const token = this.jwtService.sign(
+      { sub: user.id_usu },
+      { expiresIn: '15m' },
+    );
+
+    await this.mailService.enviarCorreoRecuperacion(email, token);
+
+    return {
+      mensaje: 'Correo enviado con el enlace para restablecer contraseña',
+    };
+  }
+
+  @Post('restablecer-password')
+  @HttpCode(HttpStatus.OK)
+  async restablecerPassword(
+    @Body('token') token: string,
+    @Body('nuevaContrasena') nuevaContrasena: string,
+  ) {
+    try {
+      const payload = this.jwtService.verify(token);
+      const userId = payload.sub;
+
+      console.log('🔑 Contraseña en texto plano:', nuevaContrasena);
+
+      await this.usuariosService.actualizarContrasena(userId, nuevaContrasena);
+
+      return { mensaje: 'Contraseña actualizada correctamente' };
+    } catch (err) {
+      console.error('❌ Error al verificar token:', err.message);
+      throw new BadRequestException('Token inválido o expirado');
+    }
   }
 
   // 🧪 Prueba manual de verificación de token

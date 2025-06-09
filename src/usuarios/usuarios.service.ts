@@ -236,6 +236,22 @@ export class UsuariosService {
     return !!usuario;
   }
 
+  async buscarPorEmail(email: string): Promise<Usuario | null> {
+    return await this.usuarioRepository.findOne({
+      where: { email_usu: email },
+    });
+  }
+
+  async actualizarContrasena(id: number, nuevaClave: string): Promise<void> {
+    const secretKey = process.env.AES_SECRET_KEY;
+    const encrypted = CryptoJS.AES.encrypt(nuevaClave, secretKey).toString();
+    console.log('🛠️ Encriptando y actualizando clave:', encrypted);
+
+    await this.usuarioRepository.update(id, {
+      clave_usu: encrypted,
+    });
+  }
+
   async login(
     loginUsuarioDto: LoginUsuarioDto,
   ): Promise<{ message: string; usuario: Usuario; token: string }> {
@@ -384,6 +400,7 @@ export class UsuariosService {
 
     await this.usuarioRepository.save(usuario);
   }
+
   async exportarUsuariosExcel(): Promise<Buffer> {
     const usuarios = await this.usuarioRepository.find({
       relations: ['rol_usu'],

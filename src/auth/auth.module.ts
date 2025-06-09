@@ -6,10 +6,12 @@ import { JwtEstrategia } from './jwt.strategy';
 import { AuthController } from './auth.controller';
 import { UsuariosModule } from '../usuarios/usuarios.module';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { MailModule } from 'src/mail/mail.module';
 
 @Module({
   imports: [
     ConfigModule,
+    MailModule,
     forwardRef(() => UsuariosModule), // ✅ usa forwardRef aquí
     JwtModule.registerAsync({
       imports: [ConfigModule],

@@ -27,7 +27,7 @@ export class Usuario {
   @Column({ type: 'varchar', length: 50 })
   email_usu: string;
 
-  @Column({ type: 'varchar', length: 50 })
+  @Column({ type: 'varchar', length: 255 })
   clave_usu: string;
 
   @CreateDateColumn({

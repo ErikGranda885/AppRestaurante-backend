@@ -33,6 +33,7 @@ import { DetsRecetasModule } from './dets_recetas/dets_recetas.module';
 import { EquivalenciasModule } from './equivalencias/equivalencias.module';
 import { TransformacionesModule } from './transformaciones/transformaciones.module';
 import { LotesModule } from './lotes/lotes.module';
+import { MailModule } from './mail/mail.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { LotesModule } from './lotes/lotes.module';
     EquivalenciasModule,
     TransformacionesModule,
     LotesModule,
+    MailModule
   ],
   controllers: [
     AppController,
