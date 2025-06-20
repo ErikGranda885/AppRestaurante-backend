@@ -67,4 +67,9 @@ export class CreateCompraDto {
   @IsNotEmpty()
   @IsString()
   fech_venc_comp: string;
+
+  // 👇 Agregado temporalmente para calcular la fecha de vencimiento
+  @IsOptional()
+  @IsNumber()
+  dias_credito?: number;
 }

@@ -70,7 +70,7 @@ import { MailModule } from './mail/mail.module';
     EquivalenciasModule,
     TransformacionesModule,
     LotesModule,
-    MailModule
+    MailModule,
   ],
   controllers: [
     AppController,

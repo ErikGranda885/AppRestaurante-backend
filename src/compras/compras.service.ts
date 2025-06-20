@@ -65,6 +65,26 @@ export class ComprasService {
   // Crear una nueva compra
   async crearCompra(createCompraDto: CreateCompraDto): Promise<Compras> {
     try {
+      // 🧠 Calcular fecha de vencimiento si es crédito
+      let fechaVencimiento = new Date(createCompraDto.fech_comp);
+      if (
+        createCompraDto.form_pag_comp === 'credito' &&
+        createCompraDto.dias_credito
+      ) {
+        const diasCredito = parseInt(
+          createCompraDto.dias_credito.toString(),
+          10,
+        );
+        if (!isNaN(diasCredito)) {
+          fechaVencimiento.setDate(fechaVencimiento.getDate() + diasCredito);
+        }
+      } else {
+        // Si no es crédito, usar la fecha actual
+        fechaVencimiento = new Date(createCompraDto.fech_comp);
+      }
+
+      createCompraDto.fech_venc_comp = fechaVencimiento.toISOString();
+
       const nuevaCompra = this.comprasRepository.create(createCompraDto);
 
       // 🛡️ Validar SIEMPRE si la fecha está cerrada (no se permite ninguna compra)
@@ -90,6 +110,7 @@ export class ComprasService {
         }
         await this.cierreDiaService.actualizarResumenDelDia(fecha);
       }
+
       // 🔊 Notificar al frontend que hay nuevas compras
       this.comprasGateway.emitirActualizacionCompras();
       return compraGuardada;
