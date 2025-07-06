@@ -1,7 +1,7 @@
 import { NestFactory, Reflector } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ClassSerializerInterceptor, ValidationPipe } from '@nestjs/common';
-import * as cookieParser from 'cookie-parser'; // ✅ Importa cookie-parser
+import * as cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -20,12 +20,16 @@ async function bootstrap() {
   // Serializador global
   app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
 
-  // ✅ Habilita CORS con envío de cookies
+  // ✅ Habilita CORS con envío de cookies solo para producción
+  const allowedOrigin = process.env.FRONTEND_URL_PROD;
+
   app.enableCors({
-    origin: 'http://localhost:3000',
-    credentials: true, // 👈 importante para permitir cookies cross-origin
+    origin: allowedOrigin,
+    credentials: true,
   });
 
-  await app.listen(5000);
+  console.log('✅ CORS Origin habilitado:', allowedOrigin);
+
+  await app.listen(parseInt(process.env.PORT || '8080', 10), '0.0.0.0');
 }
 bootstrap();

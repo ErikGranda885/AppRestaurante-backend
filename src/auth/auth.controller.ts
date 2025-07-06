@@ -53,8 +53,8 @@ export class AuthController {
 
     res.cookie('token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: true, // 👈 para que funcione con HTTP desde localhost
+      sameSite: 'none',
       maxAge: 1000 * 60 * 60, // 1 hora
     });
 
@@ -73,8 +73,8 @@ export class AuthController {
 
     res.cookie('token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: true,
+      sameSite: 'none',
       maxAge: 1000 * 60 * 60,
     });
 
@@ -87,8 +87,8 @@ export class AuthController {
   logout(@Res({ passthrough: true }) res: Response) {
     res.clearCookie('token', {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: true,
+      sameSite: 'none',
     });
 
     return { message: 'Sesión cerrada correctamente' };
